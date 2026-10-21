@@ -1089,13 +1089,24 @@ def read_table(filename, content):
         return []
     if name.endswith(".xls"):
         raise HTTPException(400, "O formato .xls antigo não é suportado. Salve a planilha como .xlsx ou .csv")
-    try:
-        text = content.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = content.decode("cp1252", errors="replace")
+    # Exportações do Facebook/Meta e "Texto Unicode" do Excel vêm em UTF-16 (com BOM ou com bytes nulos)
+    if content[:2] in (b"\xff\xfe", b"\xfe\xff") or (len(content) > 3 and content[1:2] == b"\x00"):
+        try:
+            text = content.decode("utf-16")
+        except UnicodeError:
+            text = content.decode("utf-16-le", errors="replace")
+    else:
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = content.decode("cp1252", errors="replace")
+    text = text.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n")
     first = next((ln for ln in text.splitlines() if ln.strip()), "")
     delim = max((";", ",", "\t"), key=lambda d: first.count(d))
-    return [r for r in csv.reader(io.StringIO(text), delimiter=delim) if any(c.strip() for c in r)]
+    try:
+        return [r for r in csv.reader(io.StringIO(text, newline=""), delimiter=delim) if any(c.strip() for c in r)]
+    except csv.Error as e:
+        raise HTTPException(400, f"não consegui ler a planilha ({e}). Abra no Excel e salve como .xlsx ou CSV UTF-8")
 
 def detect_columns(header):
     idx = {"phone": None, "name": None, "company": None, "context": None}

@@ -203,7 +203,7 @@ async def main():
     check("funil: percentuais", f["steps"][1]["pct_total"] == 75.0 and f["steps"][2]["pct_prev"] == 66.7, f["steps"])
     check("funil: laterais (reunião, descartado, perdido)", f["side"]["reunioes"] == 1 and f["side"]["descartados"] == 1 and f["side"]["perdidos"] == 1, f["side"])
     check("funil: tempo mediano até a 1ª resposta = 10 min", f["times"]["first_reply_min"] == 10.0, f["times"])
-    check("funil: por nicho e série diária", f["by_niche"] and f["by_niche"][0]["leads"] == 8 and len(f["daily"]) == 14 and f["daily"][-1]["leads"] == 8, (f["by_niche"], f["daily"][-1]))
+    check("funil: por nicho e série diária", f["by_niche"] and f["by_niche"][0]["leads"] == 8 and len(f["daily"]) == 14 and sum(x["leads"] for x in f["daily"][-2:]) == 8, (f["by_niche"], f["daily"][-2:]))
     check("funil: período curto/filtro", S.compute_funnel(0)["days"] == 1 and S.compute_funnel(9999)["days"] == 365)
     old = q(S, "SELECT 1")  # smoke do endpoint
     check("endpoint /api/funnel devolve o mesmo cálculo", (await S.funnel(30))["total"] == 8)

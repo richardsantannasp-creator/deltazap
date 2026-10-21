@@ -338,6 +338,7 @@ const step = async (name, fn) => {
     await page.click('#atest'); await until(async () => (await sentTo('5521999991111')).length === n + 1, 6000, 'aviso de teste')
   })
   await step('lembrete de SLA chega quando o prazo passa', async () => {
+    await api('/api/alerts', { method: 'PUT', body: { start_hour: 0, end_hour: 24 } }) // a janela padrão (8h-20h) depende da hora em que o teste roda
     await db("UPDATE leads SET alerted_at=alerted_at-3600 WHERE phone='5531911110001'")
     const n = (await sentTo('5521999991111')).length
     expect((await api('/__test/sla', { body: {} })).json.reminders === 1, 'um lembrete')

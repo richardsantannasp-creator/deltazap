@@ -1,0 +1,8 @@
+{
+  "name": "Limpa Multas",
+  "outbound_text": "Olá, {nome}! Aqui é a Ana, assistente virtual da Limpa Multas BR. Você pediu a análise de uma multa pelo nosso site. Pode me enviar uma foto da notificação por aqui? Se não quiser receber mensagens, responda SAIR.",
+  "doc_hint": "tipo de documento (Notificação de Autuação, Notificação de Penalidade ou aviso de suspensão/cassação), órgão autuador, UF e cidade, tipo de infração e enquadramento, data da infração e data-limite para defesa ou recurso",
+  "template": "",
+  "template_lang": "pt_BR",
+  "keywords": "multa, recurso de multa, cnh, suspensão, suspensao, cassação, cassacao, jari, cetran, defesa prévia, defesa previa, lei seca, radar, pontos na cnh, notificação, notificacao, limpa multas, programa de parceiros, despachante"
+}

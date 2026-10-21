@@ -1,0 +1,11 @@
+# HTTPS automático (Let's Encrypt). O domínio vem de SDR_DOMAIN.
+{$SDR_DOMAIN} {
+	encode gzip
+	# O webhook da Meta (/webhook) e o painel passam pelo mesmo endereço; o painel exige o DASH_TOKEN.
+	reverse_proxy sdr:8000
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+}

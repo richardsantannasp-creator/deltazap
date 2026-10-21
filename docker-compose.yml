@@ -1,0 +1,42 @@
+# Sobe o SDR completo num servidor: servidor + conector do WhatsApp + HTTPS automático (Caddy).
+# 1) copie env.example para .env e preencha (DASH_TOKEN, ANTHROPIC_API_KEY, GATEWAY_SECRET)
+# 2) defina SDR_DOMAIN no .env (ex.: sdr.suaempresa.com.br) apontando para o IP do servidor
+# 3) docker compose up -d --build
+services:
+  sdr:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      GATEWAY_URL: http://gateway:3001
+    volumes:
+      - sdr-data:/data
+    expose: ["8000"]            # só a rede interna; quem aparece para a internet é o Caddy
+    depends_on: [gateway]
+
+  gateway:
+    build: ./gateway
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      INBOUND_URL: http://sdr:8000/gateway/inbound
+      GATEWAY_PORT: "3001"
+    volumes:
+      - wa-session:/session     # sessão do WhatsApp (guarde com cuidado: quem tem esta pasta controla o número)
+    expose: ["3001"]            # NUNCA publique esta porta
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      SDR_DOMAIN: ${SDR_DOMAIN:?defina SDR_DOMAIN no .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [sdr]
+
+volumes:
+  sdr-data:
+  wa-session:
+  caddy-data:

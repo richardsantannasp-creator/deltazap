@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Painel SDR WhatsApp</title>
+<style>
+:root{--bg:#0a2218;--card:#103928;--tx:#f2fbf5;--mut:#9cc3ad;--bd:#1f4d39;--ac:#25d366;--acx:#07241a;--lk:#43cd66;--in:#1b5a3a;--out:#14442f;--chat:#0b2519;--ok:#43cd66;--wr:#f5c542;--er:#ff6b6b;color-scheme:dark}
+@media(prefers-color-scheme:light){:root{--bg:#f0f4f9;--card:#ffffff;--tx:#1c1e21;--mut:#526571;--bd:#e0e6ee;--ac:#25d366;--acx:#07241a;--lk:#128c4a;--in:#d8f4cc;--out:#ffffff;--chat:#e8f2e1;--ok:#1a9f5a;--wr:#b7791f;--er:#d14343;color-scheme:light}}
+body{font-family:'WhatsApp Sans Var',system-ui,-apple-system,'Segoe UI',Roboto,Arial,sans-serif}button:not(.g):not(.d):not(.tab){background-image:none;color:var(--acx);font-weight:600}button.d{color:#fff}.col{border-radius:14px}.col h2{letter-spacing:.08em}header{background:var(--card)}a{color:var(--lk)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+header{display:flex;align-items:center;gap:10px;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--bd);flex-wrap:wrap}
+header h1{font-size:16px;margin:0 8px 0 0}.sp{flex:1}
+.tab{background:none;color:var(--mut);border:0;border-bottom:2px solid transparent;border-radius:0;padding:6px 10px}.tab.on{color:var(--tx);border-color:var(--ac);font-weight:600}
+.pill{font-size:12px;padding:3px 9px;border-radius:99px;border:1px solid var(--bd);color:var(--mut)}.pill.on{color:var(--ok);border-color:var(--ok)}.pill.off{color:var(--wr);border-color:var(--wr)}
+main{display:grid;gap:12px;padding:12px;height:calc(100vh - 56px);min-height:560px}
+#v1{grid-template-columns:250px 1fr 330px}#v2{grid-template-columns:260px 1fr}
+.col{background:var(--card);border:1px solid var(--bd);border-radius:10px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.col h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0;padding:10px 12px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;gap:8px}
+.scroll{overflow:auto;flex:1;min-height:0}
+.item{padding:10px 12px;border-bottom:1px solid var(--bd);cursor:pointer}.item.sel{background:var(--bg)}.item small{color:var(--mut)}
+.tag{font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid var(--bd);margin:4px 4px 0 0;display:inline-block;color:var(--mut)}
+.tag.q{color:var(--ok);border-color:var(--ok)}.tag.h{color:var(--wr);border-color:var(--wr)}
+#chat{background:var(--chat);padding:12px;display:flex;flex-direction:column;gap:6px}
+.av{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;flex:none;overflow:hidden;background:var(--c,#667);color:#fff;font:600 13px system-ui;vertical-align:middle}.av::before{content:attr(data-i)}.av.has::before{content:none}.av img{width:100%;height:100%;object-fit:cover;display:block}.av.sm{width:28px;height:28px;font-size:11px}.av.lg{width:40px;height:40px;font-size:14px}
+.item>.av{float:left;margin:2px 9px 0 0}.item>.av~*{}
+.mrow{display:flex;gap:7px;align-items:flex-end;max-width:92%}.mrow.l{align-self:flex-start}.mrow.s{align-self:flex-end;flex-direction:row-reverse}.mrow .msg{align-self:auto;max-width:none}
+.msg{max-width:78%;padding:7px 10px;border-radius:9px;white-space:pre-wrap;word-wrap:break-word;border:1px solid var(--bd)}
+.msg.l{align-self:flex-start;background:var(--out)}.msg.s{align-self:flex-end;background:var(--in)}.msg time{display:block;font-size:11px;color:var(--mut)}
+.bar{display:flex;gap:8px;padding:10px;border-top:1px solid var(--bd);flex-wrap:wrap}
+input,button,select,textarea{font:inherit;color:var(--tx)}
+input[type=text],select,textarea{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;width:100%}input.f{flex:1}
+textarea{resize:vertical}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:8px 12px;cursor:pointer}button.g{background:var(--bg);color:var(--tx);border:1px solid var(--bd)}button.d{background:var(--er)}
+.ev{padding:6px 12px;border-bottom:1px solid var(--bd);font-size:12px;word-break:break-word}.ev time{color:var(--mut);margin-right:6px}
+.k{font-weight:600}.k.webhook{color:#3b82f6}.k.claude,.k.agente,.k.roteamento,.k.teste{color:var(--ac)}.k.crm,.k.agenda,.k.humano,.k.aviso{color:var(--wr)}.k.whatsapp,.k.outbound,.k.encaminhado,.k.arquivo{color:var(--ok)}.k.erro{color:var(--er)}
+.crm{padding:10px 12px;border-bottom:1px solid var(--bd);font-size:13px;max-height:38%;overflow:auto}.crm div{display:flex;justify-content:space-between;gap:10px;padding:2px 0}.crm span:first-child{color:var(--mut);white-space:nowrap}.crm span:last-child{text-align:right}
+.form{padding:14px;overflow:auto;display:flex;flex-direction:column;gap:10px}.form label{font-size:12px;color:var(--mut);display:block;margin-bottom:3px}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>div{flex:1;min-width:160px}
+dialog{border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--tx);width:min(560px,94vw);padding:16px}dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog h3{margin:0 0 10px}.pv{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;font-size:13px;color:var(--mut);margin:6px 0;white-space:pre-wrap}
+#v3{grid-template-columns:minmax(300px,1fr) minmax(300px,1fr)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;padding:12px}.kpi{background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:8px 10px}.kpi small{color:var(--mut);display:block}.kpi b{font-size:18px}
+.bars{display:flex;align-items:flex-end;gap:2px;height:64px;padding:0 12px}.bars i{flex:1;background:var(--ac);opacity:.75;border-radius:2px 2px 0 0;min-height:2px}
+.qr{display:flex;gap:14px;align-items:center;padding:12px;flex-wrap:wrap}.qr img{width:280px;height:280px;background:#fff;padding:12px;border-radius:8px;border:1px solid var(--bd)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.warn{background:rgba(199,131,26,.12);border:1px solid var(--wr);border-radius:8px;padding:8px 10px;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;border-bottom:1px solid var(--bd);text-align:left}th{color:var(--mut);font-weight:500}
+.bar{position:relative}.emop{position:absolute;left:10px;bottom:100%;margin-bottom:6px;width:min(330px,92%);background:var(--card);border:1px solid var(--bd);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.25);z-index:5}
+.emt{display:flex;border-bottom:1px solid var(--bd)}.emt button{flex:1;background:none;color:var(--tx);border-radius:0;padding:6px 0;font-size:18px}.emt button.on{background:var(--bg)}
+.emg{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;padding:8px;max-height:180px;overflow:auto}.emg button{background:none;color:var(--tx);font-size:21px;padding:3px 0;border-radius:6px}.emg button:hover{background:var(--bg)}
+.row>input[type=text]{width:auto;flex:1 1 70px;min-width:60px}.bar input.f{flex:1 1 200px;min-width:200px}.bar .br{flex-basis:100%;height:0}
+.hide{display:none!important}.note{font-size:12px;color:var(--mut)}
+.fun{padding:12px;display:flex;flex-direction:column;gap:8px}.fr{display:grid;grid-template-columns:150px 1fr 120px;gap:10px;align-items:center;font-size:13px}.fr .bk{background:var(--bg);border-radius:6px;height:26px;overflow:hidden;border:1px solid var(--bd)}.fr .bk i{display:block;height:100%;background:var(--ac);opacity:.85;min-width:2px}.fr small{color:var(--mut)}
+.dd{display:flex;align-items:flex-end;gap:3px;height:90px;padding:0 12px}.dd div{flex:1;display:flex;align-items:flex-end;gap:1px;height:100%}.dd i{flex:1;border-radius:2px 2px 0 0;min-height:2px}.dd i.a{background:var(--ac);opacity:.8}.dd i.b{background:var(--wr)}
+.stp{display:grid;grid-template-columns:80px 150px 1fr 30px;gap:6px;align-items:start;padding:8px 0;border-bottom:1px solid var(--bd)}.stp .tt{grid-column:2/4}
+.ocb{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--bd)}.ocb button{padding:4px 9px;font-size:12px}.ocb .st{flex-basis:100%;font-size:12px;color:var(--mut)}
+.pill.wait{color:var(--er);border-color:var(--er);cursor:pointer}
+#v4,#v5,#v6,#v7,#v8{grid-template-columns:minmax(320px,1fr) minmax(320px,1fr)}
+@media(max-width:900px){main{height:auto}#v1,#v2,#v4,#v5,#v6,#v7,#v8{grid-template-columns:1fr}.col{min-height:420px}.fr{grid-template-columns:110px 1fr 90px}}
+</style></head><body>
+<header><h1>SDR WhatsApp</h1>
+<button class="tab on" id="t1">Conversas</button><button class="tab" id="t2">Agentes (nichos)</button><button class="tab" id="t3">Envio e conexão</button><button class="tab" id="t4">Funil</button><button class="tab" id="t5">Avisos</button><button class="tab" id="t6">Retomada</button><button class="tab" id="t7">Custos</button><button class="tab" id="t8">Integrações</button><span class="sp"></span>
+<span class="pill wait hide" id="pw"></span><span class="pill" id="pc" style="cursor:pointer">Conexão: …</span><span class="pill" id="pm">Modelo: …</span><span class="pill" id="pdg" style="cursor:pointer" title="Confere chave do Claude, WhatsApp, áudio, vídeo, avisos, backup e mais">Verificar instalação</span></header>
+<div id="opn" class="hide" role="status" style="padding:8px 16px;font-size:13px;border-bottom:1px solid var(--bd)"></div>
+
+<main id="v1">
+<section class="col"><h2>Leads <button id="open">Disparar</button></h2><div class="scroll" id="leads"></div></section>
+<section class="col"><h2><span id="ct">Conversa</span><span><button class="g" id="fb" style="display:none">Arquivos</button> <button class="g" id="lx" style="display:none">Exportar dados</button> <button class="d" id="ld" style="display:none">Apagar dados</button> <button class="g" id="tk" style="display:none"></button> <button class="g" id="tq" style="display:none" title="Coloca a conversa na fila da equipe (atendentes logados)">Enviar à equipe</button></span></h2>
+<div class="scroll" id="chat"></div>
+<details id="ndet" style="padding:4px 12px;border-top:1px solid var(--bd)"><summary class="note" style="cursor:pointer">Notas internas <span id="ndn"></span> — só a equipe vê, nunca vão ao lead</summary><div id="ndl"></div><div class="row"><input type="text" id="ndi" placeholder="Anotar algo sobre este lead…"><button class="g" id="ndadd">Salvar nota</button></div></details>
+<div class="bar"><select id="qrd" style="width:auto;max-width:150px;display:none"><option value="">Respostas rápidas…</option></select><div class="emop hide" id="emop"><div class="emt" id="emt"></div><div class="emg" id="emg"></div></div><button class="g" id="emo" title="Emojis" style="font-size:16px;padding:6px 10px">😊</button><input type="text" class="f" id="mi" placeholder="Mensagem…"><button id="snd">Enviar como SDR</button>
+<span class="br"></span>
+<button id="sug" class="g" title="O Claude sugere a próxima mensagem; você edita e envia">Sugerir resposta</button><button id="sim" class="g" title="Simula o lead falando; nada é enviado ao WhatsApp">Testar como lead</button><button id="simf" class="g" title="Simula o lead enviando um PDF, JPG, áudio ou vídeo (testa a leitura e a transcrição)">Anexar arquivo (teste)</button><input type="file" id="ff" accept="image/*,application/pdf,audio/*,video/*,.ogg,.opus,.m4a,.mp3,.mp4,.3gp,.mov" class="hide"></div></section>
+<section class="col"><h2>Integração ao vivo</h2><div class="crm" id="crm"></div><div class="ocb hide" id="oc"></div><div class="scroll" id="log"></div></section>
+</main>
+
+<main id="v2" class="hide">
+<section class="col"><h2>Agentes por nicho <button id="nn">+ Novo</button></h2><div class="scroll" id="nl"></div></section>
+<section class="col"><h2><span id="et">Editar agente</span><span class="note" id="es"></span></h2>
+<div class="form" id="ef">
+ <div class="row"><div><label>Nome do nicho</label><input type="text" id="en"></div>
+  <div style="flex:0 0 auto;align-self:flex-end"><label style="display:flex;gap:6px;align-items:center;margin:0 0 10px"><input type="checkbox" id="ed"> Nicho padrão (quem chamar sem disparo)</label></div></div>
+ <div><label>Palavras-chave que direcionam leads receptivos a este agente (separadas por vírgula)</label><input type="text" id="ek" placeholder="ex.: plano de saúde, convênio, unimed"></div>
+ <div><label>Prompt do agente (personalidade, fluxo, regras, objeções) <button type="button" class="g ld" data-t="ep" style="float:right;padding:2px 8px;font-size:12px">Carregar de arquivo</button></label><textarea id="ep" rows="14"></textarea></div>
+ <div><label>Base de conhecimento (fatos que o agente pode afirmar; o que não estiver aqui ele não inventa) <button type="button" class="g ld" data-t="ekb" style="float:right;padding:2px 8px;font-size:12px">Carregar de arquivo</button></label><textarea id="ekb" rows="12"></textarea></div>
+ <div><label>O que o Claude deve extrair de imagens e PDFs enviados pelo lead (opcional)</label><input type="text" id="edh" placeholder="ex.: tipo de documento, órgão, datas e prazos"></div>
+ <div><label>Texto do 1º contato (use {nome} e {empresa})</label><textarea id="eo" rows="3"></textarea></div>
+ <div class="row"><div><label>Template aprovado na Meta (nome)</label><input type="text" id="etp" placeholder="vazio = texto livre (só dentro de 24h)"></div>
+  <div><label>Idioma do template</label><input type="text" id="el" value="pt_BR"></div></div>
+ <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="epz"> Claude personaliza o 1º contato de cada lead (usa nome, empresa e contexto; não vale quando há template da Meta)</label>
+ <details id="abx"><summary style="cursor:pointer;font-weight:600">Teste A/B do prompt</summary>
+  <div class="note" style="margin:6px 0">Compare dois jeitos de conversar. Uma parte dos leads <b>novos</b> usa o prompt B (cada lead fica sempre na mesma versão). O 1º contato é o mesmo. Não edite o B no meio do teste, senão os números se misturam.</div>
+  <label>Prompt B (variante)</label><textarea id="epb" rows="6" placeholder="Cole aqui a versão B do prompt. Em branco = sem teste."></textarea>
+  <div class="row" style="align-items:flex-end;margin-top:6px"><div style="flex:0 0 190px"><label>% dos leads novos no prompt B (0 = desligado)</label><input type="text" inputmode="numeric" id="eab" value="0"></div>
+   <button type="button" class="g" id="et3">Testar com prompt B</button><button type="button" class="g" id="eabr">Ver resultados (30 dias)</button></div>
+  <div id="eabo" style="margin-top:8px"></div></details>
+ <details id="catx"><summary style="cursor:pointer;font-weight:600">Catálogo de produtos e preços <span class="note" id="catn"></span></summary>
+  <div class="note" style="margin:6px 0">O agente só informa o preço que está aqui e nunca passa do desconto máximo. Para fechar a venda no WhatsApp, configure o pagamento em Integrações.</div>
+  <table><thead><tr><th>Produto</th><th>Preço</th><th>Desc. máx.</th><th>Link fixo</th><th></th></tr></thead><tbody id="catl"></tbody></table>
+  <div class="row" style="margin-top:6px"><div><label>Nome</label><input type="text" id="cp_n" maxlength="120"></div><div style="flex:0 0 120px"><label>Preço (R$)</label><input type="text" id="cp_p" placeholder="197,90"></div>
+   <div style="flex:0 0 100px"><label>Unidade</label><input type="text" id="cp_u" placeholder="mês"></div><div style="flex:0 0 110px"><label>Desc. máx. (%)</label><input type="text" id="cp_m" value="0"></div></div>
+  <div class="row"><div><label>Descrição curta (o que o agente pode dizer)</label><input type="text" id="cp_d" maxlength="600"></div><div><label>Link de pagamento fixo (opcional, https://)</label><input type="text" id="cp_l"></div></div>
+  <div class="row" style="align-items:center"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="cp_a" checked> Ativo</label><button type="button" id="cp_save">Adicionar produto</button><button type="button" class="g hide" id="cp_cancel">Cancelar edição</button><span class="note" id="cp_msg"></span></div>
+  <details style="margin-top:6px"><summary class="note" style="cursor:pointer">Importar vários de uma vez</summary>
+   <textarea id="cp_imp" rows="4" placeholder="nome;preço;descrição;link;desconto_max;unidade&#10;Plano Ouro;197,90;Cobertura nacional;;5;mês"></textarea><div class="row"><button type="button" class="g" id="cp_impgo">Importar lista</button><span class="note" id="cp_impm"></span></div></details></details>
+ <details id="kbx"><summary style="cursor:pointer;font-weight:600">Documentos da base de conhecimento <span class="note" id="kbn"></span></summary>
+  <div class="note" style="margin:6px 0">FAQ, políticas, condições, prazos, argumentos. Base pequena vai inteira para o agente; base grande entra só nos trechos que combinam com a conversa. Aceita texto colado ou arquivo .txt/.md/.csv (PDF e Word: copie e cole o texto).</div>
+  <table><thead><tr><th>Documento</th><th>Tamanho</th><th></th></tr></thead><tbody id="kbl"></tbody></table>
+  <label style="margin-top:6px">Título</label><input type="text" id="kbt" maxlength="120"><label>Texto</label><textarea id="kbb" rows="6"></textarea>
+  <div class="row" style="align-items:center"><button type="button" id="kbsave">Adicionar documento</button><button type="button" class="g hide" id="kbcancel">Cancelar edição</button><button type="button" class="g" id="kbfile">Enviar arquivo</button><input type="file" id="kbf" accept=".txt,.md,.csv,.json,.html,.htm" class="hide"><span class="note" id="kbm"></span></div>
+  <label style="margin-top:8px">Conferir: o que o agente enxerga para esta pergunta de um cliente</label>
+  <div class="row"><input type="text" id="kbq" placeholder="ex.: qual o prazo de entrega para Campinas?"><button type="button" class="g" id="kbprev">Ver</button></div><pre class="pv" id="kbpv" style="white-space:pre-wrap;max-height:220px;overflow:auto"></pre></details>
+ <details id="matx"><summary style="cursor:pointer;font-weight:600">Materiais para enviar (PDF, imagem, vídeo, áudio) <span class="note" id="matn"></span></summary>
+  <div class="note" style="margin:6px 0">Catálogo, tabela de preços, vídeo de demonstração... O agente envia sozinho quando o lead pede ou quando ajuda a decidir, no máximo uma vez a cada 6 h por lead. O <b>nome</b> é como o agente chama o material. Aceita PDF, JPG/PNG/WebP, MP4, áudio, Word, Excel, PowerPoint e TXT (até 12 MB).</div>
+  <table><thead><tr><th>Material</th><th>Tipo</th><th>Enviado</th><th></th></tr></thead><tbody id="matl"></tbody></table>
+  <label style="margin-top:6px">Nome</label><input type="text" id="mat_n" maxlength="60" placeholder="ex.: Catálogo 2026">
+  <label>Quando enviar (opcional)</label><input type="text" id="mat_d" maxlength="300" placeholder="ex.: quando o lead pedir preços ou cobertura">
+  <div class="row" style="align-items:center"><button type="button" id="mat_go">Escolher arquivo e cadastrar</button><input type="file" id="mat_f" accept=".pdf,.jpg,.jpeg,.png,.webp,.mp4,.3gp,.ogg,.mp3,.m4a,.aac,.amr,.docx,.xlsx,.pptx,.txt" class="hide"><span class="note" id="mat_m"></span></div></details>
+ <details id="evx"><summary style="cursor:pointer;font-weight:600">Avaliar o agente com clientes simulados</summary>
+  <div class="note" style="margin:6px 0">Um segundo Claude faz o papel de clientes difíceis (pechincha, tenta enganar, pergunta fora da base...). O sistema confere preço, link, desconto, vazamento de instruções, respeito ao SAIR e honestidade sobre ser IA; um avaliador dá notas. <b>Usa o Claude de verdade e gera custo</b>; nada é enviado ao WhatsApp e os dados simulados são apagados. A nota varia um pouco entre execuções: compare tendências, não décimos.</div>
+  <div id="evp" class="grid2"></div>
+  <div class="row" style="align-items:flex-end;margin-top:6px"><div style="flex:0 0 150px"><label>Mensagens do cliente por cenário</label><select id="evt"><option>4</option><option selected>6</option><option>8</option></select></div>
+   <div style="flex:0 0 130px"><label>Versão do prompt</label><select id="evv"><option value="A">A (principal)</option><option value="B">B (teste A/B)</option></select></div>
+   <button type="button" id="evgo">Rodar avaliação</button><span class="note" id="evm"></span></div>
+  <table style="margin-top:8px"><thead><tr><th>Quando</th><th>Nota</th><th>Falhas graves</th><th>Cenários</th><th></th></tr></thead><tbody id="evl"></tbody></table><div id="evd" style="margin-top:8px"></div></details>
+ <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="efu"> Retomada automática: retomar leads que pararam de responder (cadência na aba Retomada)</label>
+ <div class="row"><button id="es_">Salvar</button><button class="g" id="ec">Duplicar</button><button class="g" id="et_">Testar ativo</button><button class="g" id="et2">Testar receptivo</button><button class="d" id="ex">Excluir</button></div>
+ <div class="note">Todo agente atua nos dois modos: <b>ativo</b> (você dispara o 1º contato) e <b>receptivo</b> (o lead chama primeiro e é direcionado pelas palavras-chave; sem acerto, cai no nicho padrão). As ferramentas são as mesmas para todos; o que muda é o prompt e o 1º contato.</div>
+</div></section>
+</main>
+
+<main id="v3" class="hide">
+<section class="col"><h2>Conexão e métricas <span class="note" id="mrisk"></span></h2><div class="scroll">
+ <div id="linebar" class="hide" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
+ <div id="lineinfo" class="note hide" style="margin-bottom:8px"></div>
+ <div class="row hide" id="lineadd" style="margin-bottom:10px;align-items:center;flex-wrap:wrap"><input type="text" id="ln_label" placeholder="Nome do novo número (ex.: Comercial 2)" style="max-width:280px"><button class="g" id="ln_add">Adicionar número</button><span class="note" id="ln_msg"></span></div>
+ <div class="qr" id="qrbox"></div>
+ <div class="qr hide" id="pairbox"><div style="width:100%"><b>Não consegue escanear? Conecte pelo número</b><br><span class="note">No celular: WhatsApp > Aparelhos conectados > Conectar um aparelho > "Conectar com número de telefone". Digite aqui o número desta conta (DDI + DDD) e depois digite o código no celular.</span>
+ <div class="row" style="margin-top:8px"><input type="text" id="pn" placeholder="5511999999999" style="max-width:220px"><button id="pg">Gerar código</button></div><div id="pcode" style="font-size:28px;letter-spacing:4px;font-weight:700;margin-top:8px"></div></div></div>
+ <div class="kpis" id="kpis"></div>
+ <div class="note" style="padding:0 12px">Envios por hora (hoje)</div><div class="bars" id="bars"></div>
+ <div style="padding:12px"><table><thead><tr><th>Nicho (7 dias)</th><th>Enviados</th><th>Responderam</th></tr></thead><tbody id="bn"></tbody></table></div>
+</div></section>
+<section class="col"><h2>Ritmo de envio <span class="note">reduz o risco de bloqueio, não o elimina</span></h2><div class="scroll"><div class="form">
+ <div id="apause"></div>
+ <div class="grid2"><div><label>Intervalo mínimo entre envios (s)</label><input type="text" id="p_min_delay"></div><div><label>Intervalo máximo (s)</label><input type="text" id="p_max_delay"></div>
+ <div><label>Pausa maior a cada (envios)</label><input type="text" id="p_batch_size"></div><div><label>Pausa do lote (min, de/até)</label><div class="row"><input type="text" id="p_batch_pause_min"><input type="text" id="p_batch_pause_max"></div></div>
+ <div><label>Limite diário de contatos novos</label><input type="text" id="p_daily_limit"></div><div><label>Janela de envio (hora de/até)</label><div class="row"><input type="text" id="p_start_hour"><input type="text" id="p_end_hour"></div></div>
+ <div><label>Atraso antes de responder lead (s, de/até)</label><div class="row"><input type="text" id="p_reply_delay_min"><input type="text" id="p_reply_delay_max"></div></div><div><label>Pausar se saídas/descartes passarem de (%)</label><input type="text" id="p_max_optout_pct"></div></div>
+ <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="p_warmup"> Aquecimento gradual: começa com <b id="wu">20</b> por dia e sobe até o limite</label>
+ <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="p_weekdays_only"> Só dias úteis</label>
+ <div class="row"><button id="psave">Salvar ritmo</button><button class="g" id="ppause">Pausar envios</button><button class="g" id="pclear">Limpar fila</button></div>
+ <div class="note" id="pinfo"></div>
+ <table><thead><tr><th>Fila e últimos envios</th><th>Nicho</th><th>Status</th></tr></thead><tbody id="bq"></tbody></table>
+ <div class="note">Aviso: conexão por QR code usa uma biblioteca não oficial e pode violar os Termos do WhatsApp. Atrasos e limites ajudam, mas nenhuma configuração garante que o número não seja bloqueado. Dispare apenas para quem consentiu e mantenha a opção SAIR.</div>
+</div></div></section>
+</main>
+
+<input type="file" id="lf" accept=".txt,.md,text/plain,text/markdown" class="hide">
+<main id="v4" class="hide">
+<section class="col"><h2><span>Funil de conversão</span><select id="fd" style="width:auto"><option value="7">7 dias</option><option value="30" selected>30 dias</option><option value="90">90 dias</option></select></h2><div class="scroll"><div class="fun" id="fsteps"></div>
+<div class="kpis" id="fside"></div><div class="note" style="padding:0 12px 12px" id="fnote"></div></div></section>
+<section class="col"><h2>Tempos, nichos e retomadas</h2><div class="scroll"><div class="kpis" id="ftimes"></div>
+<div class="note" style="padding:0 12px">Leads novos por dia (verde) e encaminhados ao corretor (laranja), últimos 14 dias</div><div class="dd" id="fdaily"></div>
+<div style="padding:12px"><table><thead><tr><th>Nicho</th><th>Leads</th><th>Resp.</th><th>Qualif.</th><th>Encam.</th><th>Ganhos</th></tr></thead><tbody id="fniche"></tbody></table></div>
+<div class="note" style="padding:0 12px 12px" id="ffu"></div>
+<div style="padding:0 12px 12px"><h3 style="margin:8px 0;font-size:14px">Vendas pelo WhatsApp</h3><div class="kpis" id="okpi"></div>
+<table><thead><tr><th>Quando</th><th>Lead</th><th>Produto</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody id="ordl"></tbody></table><div class="note" id="ordn"></div></div></div></section>
+</main>
+
+<main id="v5" class="hide">
+<section class="col"><h2>Avisar o corretor <span class="note" id="as"></span></h2><div class="scroll"><div class="form">
+ <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="a_enabled"> Avisos ligados</label>
+ <div class="grid2"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="a_on_encaminhado"> Lead encaminhado</label>
+ <label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="a_on_humano"> Pediu atendente</label>
+ <label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="a_on_reuniao"> Reunião agendada</label>
+ <label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="a_on_resposta"> Lead respondeu e não foi atendido</label></div>
+ <div><label>WhatsApp do corretor/equipe (com DDD; vários separados por vírgula). Recebem o aviso pelo número conectado.</label><input type="text" id="a_whatsapp_to" placeholder="21999991111, 11988887777"><div id="a_wavs" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px"></div></div>
+ <div class="row"><div><label>Lembrar após (min)</label><input type="text" inputmode="numeric" id="a_sla_min"></div><div><label>Repetir a cada (min)</label><input type="text" inputmode="numeric" id="a_repeat_min"></div><div><label>Máx. de lembretes</label><input type="text" inputmode="numeric" id="a_max_reminders"></div></div>
+ <div class="row"><div><label>Lembretes a partir de (h)</label><input type="text" inputmode="numeric" id="a_start_hour"></div><div><label>Até (h)</label><input type="text" inputmode="numeric" id="a_end_hour"></div></div>
+ <div class="row"><button id="asave">Salvar</button><button class="g" id="atest">Enviar aviso de teste</button></div>
+ <div id="ach" class="note"></div>
+ <div class="note">Os avisos não saem se o lead for de teste. O WhatsApp de aviso passa pela mesma fila de conexão; no modo QR, o corretor precisa já ter conversado com o número ou salvá-lo nos contatos para evitar bloqueio. E-mail e Slack/Discord são configurados no arquivo .env (veja env.example).</div>
+</div></div></section>
+<section class="col"><h2>Aguardando atendimento</h2><div class="scroll"><div id="aw"></div>
+<h2 style="border-top:1px solid var(--bd)">Equipe de atendimento <span class="note" id="tms"></span></h2><div class="form">
+ <div class="note">Atendentes entram em <b id="tm_url"></b> com usuário e senha. Quando a IA transfere (ou você clica em "Enviar à equipe"), a conversa vai para quem está <b>disponível</b> e com menos conversas; se ninguém estiver, fica na fila.</div>
+ <div id="tm_list"></div>
+ <div class="row" style="align-items:flex-end"><div><label>Nome</label><input type="text" id="tm_name"></div><div><label>Usuário</label><input type="text" id="tm_login" autocomplete="off"></div><div><label>Senha (vazio = gerar)</label><input type="text" id="tm_pw" autocomplete="off"></div><div style="flex:0 0 90px"><label>Máx. conversas</label><input type="text" inputmode="numeric" id="tm_max" value="5"></div><button class="g" id="tm_add">Adicionar</button></div>
+ <div class="note" id="tm_msg"></div>
+ <div class="row" style="align-items:center"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="ho_auto"> Distribuir automaticamente</label>
+  <div><label>Se ninguém atender</label><select id="ho_fb"><option value="manter">Manter na fila</option><option value="ia">A IA volta a atender</option></select></div>
+  <div style="flex:0 0 100px"><label>Esperar (min)</label><input type="text" inputmode="numeric" id="ho_wait"></div>
+  <div style="flex:0 0 130px"><label>Devolver à fila após ausência (min)</label><input type="text" inputmode="numeric" id="ho_re"></div><button class="g" id="ho_save">Salvar regras</button></div>
+<div style="border-top:1px solid var(--bd);margin-top:8px;padding-top:6px"><b>Horário de atendimento da equipe</b>
+ <label style="display:flex;gap:6px;align-items:center;margin:4px 0"><input type="checkbox" id="hr_on"> Usar horário (fora dele, o lead recebe um aviso e a IA informa quando a equipe volta)</label>
+ <div id="hr_days"></div>
+ <label>Mensagem fora do horário (<code>{horario}</code> e <code>{volta}</code> são preenchidos sozinhos)</label><textarea id="hr_msg" rows="2"></textarea>
+ <div class="row" style="align-items:center"><button class="g" id="hr_save">Salvar horário</button><span class="note" id="hr_m"></span></div></div>
+<div style="border-top:1px solid var(--bd);margin-top:8px;padding-top:6px"><b>Respostas rápidas</b> <span class="note">use {nome} e {atendente}</span>
+ <div id="qk_list"></div>
+ <div class="row" style="align-items:flex-end"><div><label>Título</label><input type="text" id="qk_t" maxlength="60"></div><div style="flex:2"><label>Texto</label><input type="text" id="qk_b" maxlength="1500"></div><button class="g" id="qk_add">Adicionar</button></div><div class="note" id="qk_m"></div></div>
+<div style="border-top:1px solid var(--bd);margin-top:8px;padding-top:6px"><b>Desempenho da equipe</b> <select id="mt_days" style="width:auto"><option value="7">7 dias</option><option value="30" selected>30 dias</option><option value="90">90 dias</option></select>
+ <table><thead><tr><th>Atendente</th><th>Conversas</th><th>Msgs</th><th>1ª resposta</th><th>Espera na fila</th><th>Ganho / Perdido</th></tr></thead><tbody id="mt_l"></tbody></table></div>
+</div>
+<h2 style="border-top:1px solid var(--bd)">Últimos avisos</h2><div style="padding:8px 12px"><table><tbody id="ar"></tbody></table></div>
+<h2 style="border-top:1px solid var(--bd)">Resumo diário ao gestor <span class="note" id="dgs"></span></h2><div class="form">
+ <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="dg_enabled"> Enviar um resumo todo dia</label>
+ <div class="row" style="align-items:flex-end"><div style="flex:0 0 120px"><label>Horário (h)</label><input type="text" inputmode="numeric" id="dg_hour"></div>
+  <label style="display:flex;gap:6px;align-items:center;margin:0 0 8px"><input type="checkbox" id="dg_weekdays_only"> Só dias úteis</label></div>
+ <div class="row"><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="dg_whatsapp"> WhatsApp</label><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="dg_email"> E-mail</label><label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="dg_webhook"> Slack/Discord</label></div>
+ <div class="row"><button id="dgsave">Salvar</button><button class="g" id="dgtest">Enviar agora</button></div>
+ <div class="note">Vai para os mesmos destinos dos avisos (números de WhatsApp acima, e-mails e webhook do .env). Se você ligar depois do horário, o primeiro resumo sai no dia seguinte. Prévia de agora:</div>
+ <div class="pv" id="dgp"></div></div></div></section>
+</main>
+
+<main id="v6" class="hide">
+<section class="col"><h2>Retomada automática <span class="note" id="rs"></span></h2><div class="scroll"><div class="form">
+ <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="r_enabled"> Retomar leads que pararam de responder</label>
+ <div class="note">Vale para leads em contato/qualificação onde o agente falou por último. Cada etapa sai pela fila de envio (mesmo ritmo, limite diário e janela de horário), termina com opção SAIR, e qualquer resposta do lead reinicia a cadência. Na última etapa o lead vai para "sem resposta".</div>
+ <div id="rsteps"></div>
+ <div class="row"><button class="g" id="radd">+ Etapa</button><button id="rsave">Salvar</button></div>
+ <div class="note" id="rprov"></div>
+</div></div></section>
+<section class="col"><h2>Próximas retomadas</h2><div class="scroll" style="padding:8px 12px"><table><thead><tr><th>Lead</th><th>Nicho</th><th>Etapa</th><th>Quando</th></tr></thead><tbody id="rp"></tbody></table></div></section>
+</main>
+
+<main id="v7" class="hide">
+<section class="col"><h2><span>Gasto com o Claude</span><select id="cd" style="width:auto"><option value="7">7 dias</option><option value="30" selected>30 dias</option><option value="90">90 dias</option></select></h2><div class="scroll">
+<div class="kpis" id="ck"></div><div id="cbud" style="padding:0 12px 12px"></div>
+<div class="note" style="padding:0 12px">Gasto por dia (R$), últimos 14 dias</div><div class="bars" id="cdaily" style="height:80px"></div>
+<div class="note" style="padding:8px 12px" id="cnote"></div></div></section>
+<section class="col"><h2>Onde o gasto acontece e preços <span class="note" id="cs"></span></h2><div class="scroll">
+<div style="padding:12px"><table><thead><tr><th>Tipo de chamada</th><th>Chamadas</th><th>R$</th></tr></thead><tbody id="ckind"></tbody></table>
+<table style="margin-top:10px"><thead><tr><th>Nicho</th><th>Chamadas</th><th>R$</th></tr></thead><tbody id="cniche"></tbody></table></div>
+<div class="form"><div class="row"><div><label>Preço de entrada (US$ por milhão de tokens)</label><input type="text" inputmode="decimal" id="c_price_in"></div><div><label>Preço de saída (US$ por milhão)</label><input type="text" inputmode="decimal" id="c_price_out"></div><div><label>Dólar (R$)</label><input type="text" inputmode="decimal" id="c_usd_brl"></div></div>
+<div class="row"><div><label>Orçamento mensal (R$, 0 = sem limite)</label><input type="text" inputmode="decimal" id="c_budget_month_brl"></div><div><label>Ao estourar o orçamento</label><select id="c_budget_action"><option value="alertar">Só avisar</option><option value="bloquear">Parar de responder (IA pausada)</option></select></div></div>
+<div class="row"><button id="csave">Salvar</button></div>
+<div class="note">Os preços padrão são só um ponto de partida: confira na página de preços da Anthropic para o seu modelo e ajuste aqui. Os avisos de 80% e 100% do orçamento vão para os canais da aba Avisos. Com "parar de responder", o lead continua sendo registrado e você pode responder pelo painel.</div></div></div></section>
+</main>
+
+<main id="v8" class="hide">
+<section class="col"><h2>CRM e agenda <span class="note" id="is"></span></h2><div class="scroll"><div class="form">
+ <div><label>Destino dos leads</label><select id="i_type"><option value="webhook">Webhook genérico (n8n, Make, Zapier, outro CRM)</option><option value="pipedrive">Pipedrive (conector pronto)</option><option value="hubspot">HubSpot (conector pronto)</option></select></div>
+ <div id="g_webhook"><label>URL do webhook</label><input type="text" id="i_url" placeholder="https://..."><label style="margin-top:8px">Segredo para assinar os envios (opcional; guardado só no servidor)</label><input type="text" id="i_secret" autocomplete="off"><div class="note" id="i_sec_note"></div></div>
+ <div id="g_pipedrive" class="hide"><label>Endereço da sua conta (ex.: minhaempresa ou minhaempresa.pipedrive.com)</label><input type="text" id="i_pd_domain"><label style="margin-top:8px">Token de API pessoal (Pipedrive > Preferências pessoais > API)</label><input type="text" id="i_pd_token" autocomplete="off"><div class="note" id="i_pd_note"></div>
+  <div class="note">Cria a pessoa (pelo telefone), um negócio, uma nota com o resumo do agente, a atividade da reunião e marca ganho/perdido.</div></div>
+ <div id="g_hubspot" class="hide"><label>Token do app privado (HubSpot > Configurações > Integrações > Aplicativos privados; escopos de contatos, negócios e notas)</label><input type="text" id="i_hs_token" autocomplete="off"><div class="note" id="i_hs_note"></div>
+  <div class="row" style="margin-top:6px"><div><label>Pipeline</label><input type="text" id="i_hs_pipeline"></div><div><label>Estágio inicial</label><input type="text" id="i_hs_stage_new"></div></div>
+  <div class="row"><div><label>Estágio de ganho</label><input type="text" id="i_hs_stage_won"></div><div><label>Estágio de perda</label><input type="text" id="i_hs_stage_lost"></div></div>
+  <div class="note">Os valores padrão são os do pipeline padrão do HubSpot. Se o seu pipeline é outro, use os identificadores internos dele.</div></div>
+ <div><label>Eventos enviados</label><div id="ievs" class="grid2"></div></div>
+ <div class="row"><button id="isave">Salvar</button><button class="g" id="itest">Testar conexão</button></div>
+ <div class="note">No webhook, cada evento é um POST com JSON (lead, estágio, resumo, reunião, resultado) e o cabeçalho X-SDR-Signature (HMAC-SHA256 do corpo, usando o segredo). Nos conectores, os dados vão direto para o CRM. Falhas são repetidas até 3 vezes e aparecem na lista abaixo. Leads de teste nunca são enviados. Os conectores usam as APIs públicas e foram testados só com servidores simulados: use "Testar conexão" e acompanhe os primeiros leads.</div>
+ <table><thead><tr><th>Quando</th><th>Evento</th><th>Resultado</th></tr></thead><tbody id="ilog"></tbody></table>
+ <div class="row" style="align-items:flex-end;margin-top:6px"><div style="flex:0 0 170px"><label>Exportar leads</label><select id="ex_d"><option value="0">Todos</option><option value="7">Últimos 7 dias</option><option value="30">Últimos 30 dias</option></select></div><button class="g" id="iexp">Baixar CSV</button></div>
+ <details id="gcx"><summary style="cursor:pointer;font-weight:700;margin-top:10px">Google Agenda: horários livres e reunião marcada de verdade <span class="note" id="gcs"></span></summary>
+ <div class="note" style="margin:6px 0">O agente consulta os horários livres da agenda, oferece ao lead e cria o evento quando ele confirma (remarcar apaga o evento antigo). Usa uma <b>conta de serviço</b> do Google: passo a passo no arquivo <b>AGENDA-GOOGLE.md</b>. Leads de teste nunca escrevem na agenda.</div>
+ <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="gc_on"> Usar o Google Agenda</label>
+ <label>ID da agenda (Configurações da agenda > Integrar agenda; ex.: abc123@group.calendar.google.com)</label><input type="text" id="gc_id" autocomplete="off">
+ <label>Conta de serviço (cole o conteúdo do arquivo .json; fica só no servidor e não volta para a tela) <span class="note" id="gc_sa"></span></label><textarea id="gc_json" rows="3" placeholder="{ &quot;type&quot;: &quot;service_account&quot;, ... }"></textarea>
+ <div class="row"><div><label>Duração (min)</label><input type="text" inputmode="numeric" id="gc_dur"></div><div><label>Antecedência mínima (min)</label><input type="text" inputmode="numeric" id="gc_not"></div><div><label>Olhar quantos dias à frente</label><input type="text" inputmode="numeric" id="gc_hor"></div><div><label>Intervalo entre horários (min)</label><input type="text" inputmode="numeric" id="gc_step"></div></div>
+ <label>Dias e horas em que a equipe recebe reuniões</label><div id="gc_days"></div>
+ <label>Título do evento (<code>{nome}</code> vira o nome do lead)</label><input type="text" id="gc_title">
+ <div class="row" style="align-items:center"><button id="gc_save">Salvar</button><button class="g" id="gc_test">Testar conexão</button><button class="g" id="gc_rm">Remover conta de serviço</button><span class="note" id="gc_m"></span></div></details>
+ <details id="payx" open><summary style="cursor:pointer;font-weight:700;margin-top:10px">Pagamentos: fechar a venda no WhatsApp <span class="note" id="pays"></span></summary>
+ <div class="note" style="margin:6px 0">O agente gera o link com o <b>preço do catálogo</b> (ele não consegue mudar o valor nem passar do desconto máximo). Pagamento confirmado: o lead vira <b>ganho</b>, a equipe é avisada e o cliente recebe a confirmação.</div>
+ <label>Como cobrar</label><select id="py_p"><option value="fixo">Link fixo de cada produto (Mercado Pago, Kiwify, Hotmart... sem desconto; você dá baixa no painel)</option><option value="asaas">Asaas (link gerado na hora, baixa automática)</option><option value="stripe">Stripe (checkout na hora, baixa automática)</option></select>
+ <div id="py_asaas" class="hide"><label style="margin-top:6px">Chave de API do Asaas</label><input type="text" id="py_ak" autocomplete="off" placeholder="" ><label style="display:flex;gap:6px;align-items:center;margin:6px 0"><input type="checkbox" id="py_sb"> Usar o ambiente de testes (sandbox)</label>
+  <div class="note">No Asaas, cadastre o webhook de cobranças com esta URL e este token (eventos de pagamento recebido e confirmado):</div><pre class="pv" id="py_awh" style="white-space:pre-wrap"></pre></div>
+ <div id="py_stripe" class="hide"><label style="margin-top:6px">Chave secreta do Stripe (sk_...)</label><input type="text" id="py_sk" autocomplete="off"><label style="margin-top:6px">Segredo do webhook (whsec_...)</label><input type="text" id="py_wh" autocomplete="off">
+  <label style="margin-top:6px">Endereço para onde o cliente volta após pagar (opcional, https://)</label><input type="text" id="py_su">
+  <div class="note">No Stripe, crie um endpoint de webhook com esta URL, evento <b>checkout.session.completed</b> (e <b>checkout.session.async_payment_succeeded</b> para Pix/boleto):</div><pre class="pv" id="py_swh" style="white-space:pre-wrap"></pre></div>
+ <div class="row" style="margin-top:6px"><div style="flex:0 0 170px"><label>Validade do link (horas)</label><input type="text" inputmode="numeric" id="py_ex" value="24"></div></div>
+ <label style="margin-top:6px">Mensagem de confirmação ao cliente após o pagamento (vazio = não enviar)</label><textarea id="py_ct" rows="2"></textarea>
+ <div class="row" style="margin-top:6px"><button type="button" id="py_save">Salvar</button><button type="button" class="g" id="py_test">Testar conexão</button><button type="button" class="g" id="py_tok">Gerar novo token do webhook</button></div>
+ <div class="note">Teste primeiro com o sandbox/ambiente de teste do provedor. Os webhooks precisam do endereço público do sistema (HTTPS).</div></details>
+ <div class="note">O CSV usa ";" como separador e abre direto no Excel. Reuniões agendadas podem ser baixadas em .ics (ou abertas no Google Agenda) na aba Conversas, no lead.</div>
+</div></div></section>
+<section class="col"><h2>Backup e hospedagem <span class="note" id="bs"></span></h2><div class="scroll"><div class="form">
+ <div class="row"><button id="bnow">Fazer backup agora</button></div>
+ <div class="note" id="binfo"></div>
+ <table><thead><tr><th>Backup</th><th>Tamanho</th><th></th></tr></thead><tbody id="blist"></tbody></table>
+ <h3 style="margin:14px 0 4px;font-size:14px">Privacidade (LGPD)</h3>
+ <div class="note" id="lgn"></div>
+ <label class="note">Quem pediu para não receber mensagens por outro canal (um número por linha). Nunca mais entram em disparos.</label><textarea id="sup_l" rows="3" placeholder="11999999999"></textarea>
+ <div class="row"><button class="g" id="sup_go">Adicionar à lista</button><span class="note" id="sup_m"></span></div>
+ <div class="note">Para atender um titular, abra o lead em Conversas: <b>Exportar dados</b> baixa tudo o que o sistema guarda sobre ele e <b>Apagar dados</b> remove tudo (quem pediu SAIR continua na lista para não receber mensagens). O CRM externo, se houver, precisa ser limpo à parte.</div>
+ <table><thead><tr><th>Quando</th><th>Ação (sem números de telefone)</th></tr></thead><tbody id="lgl"></tbody></table>
+ <div class="note">O backup contém dados pessoais dos leads (LGPD): guarde com cuidado e copie também para fora do servidor. Não inclui o arquivo .env nem a sessão do WhatsApp. Para restaurar, pare o sistema e rode <b>python restore_backup.py arquivo.zip</b>. Hospedagem com Docker e HTTPS: veja HOSPEDAGEM.md.</div>
+</div></div></section>
+</main>
+
+<dialog id="qrdlg" style="max-width:560px"><h3>Antes de usar o modo QR</h3><div class="note" style="margin-bottom:6px">Leia com atenção. Enquanto você não aceitar, o sistema não envia nenhuma mensagem e a IA não responde.</div><ul id="qrterms" style="padding-left:18px;margin:6px 0"></ul>
+<label style="display:flex;gap:8px;align-items:flex-start;margin:10px 0" class="note"><input type="checkbox" id="qrok"> Li e aceito os riscos acima.</label><input type="text" id="qrname" placeholder="Seu nome completo" maxlength="80"><div class="row" style="justify-content:flex-end;margin-top:10px"><button id="qrgo">Aceitar e continuar</button></div><div class="note" id="qrerr"></div></dialog>
+<dialog id="dgdlg" style="width:min(720px,94vw)"><h3>Verificar instalação</h3><div class="note" id="dgsum">Faz uma chamada mínima ao Claude (custo de frações de centavo) e confere cada parte do sistema.</div><div id="dgl" style="max-height:60vh;overflow:auto;margin-top:8px"></div><div class="row" style="justify-content:flex-end;margin-top:10px"><button class="g" id="dgrun">Executar de novo</button><button class="g" id="dgx">Fechar</button></div></dialog>
+<dialog id="fdlg"><h3>Arquivos recebidos</h3><div id="fl"></div><div class="row" style="justify-content:flex-end;margin-top:10px"><button class="g" id="fx">Fechar</button></div></dialog>
+<dialog id="dlg"><h3>Disparar 1º contato</h3>
+<label class="note">Nicho de atuação (define qual agente conversa)</label>
+<select id="dn"></select><div class="pv" id="dpv">Escolha um nicho para ver a mensagem.</div>
+<div class="row" style="align-items:center;margin:6px 0"><button class="g" id="upb" type="button">Importar planilha (.csv ou .xlsx)</button><a href="#" id="tpl" class="note">Baixar modelo</a><input type="file" id="upf" accept=".csv,.xlsx,.xlsm,.txt" class="hide"></div>
+<div class="note" id="upres"></div>
+<div id="dlinebox" class="hide"><label class="note">Número de envio (cada número tem o próprio limite diário e aquecimento)</label><select id="dline"></select></div>
+<label class="note">Contatos, um por linha: telefone;nome;empresa;contexto. A planilha precisa das colunas <b>nome</b> e <b>whatsapp</b> (empresa e contexto são opcionais).</label>
+<textarea id="dl" rows="6" placeholder="11999999999;Maria Souza;Padaria X&#10;21988887777;João Lima"></textarea>
+<label style="display:flex;gap:8px;align-items:flex-start;margin:10px 0" class="note"><input type="checkbox" id="dc"> Confirmo que estes contatos deram consentimento (opt-in) para receber mensagens no WhatsApp.</label>
+<label class="note" style="display:block;margin-top:8px">De onde veio o consentimento destes contatos? (obrigatório, fica registrado em cada lead)</label><input type="text" id="dorig" maxlength="200" placeholder="Ex.: formulário do site em 10/2026; lista do evento X">
+<div class="note" id="dres"></div>
+<div class="row" style="justify-content:flex-end;margin-top:8px"><button class="g" id="dx">Fechar</button><button id="dgo">Disparar</button></div>
+<div class="note">Os contatos entram numa fila e saem de forma gradual, conforme o ritmo definido na aba Envio e conexão. Quem pediu para sair nunca recebe novo disparo.</div></dialog>
+
+<script>
+let T=localStorage.getItem("tok")||prompt("Token do painel (DASH_TOKEN):")||"";localStorage.setItem("tok",T);
+const $=id=>document.getElementById(id),esc=s=>String(s??"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+async function api(p,body,method){const r=await fetch(p,{method:method||(body?"POST":"GET"),headers:{"X-Token":T,"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+ if(r.status==401){localStorage.removeItem("tok");alert("Token inválido");location.reload();throw 0}
+ if(!r.ok){const e=await r.json().catch(()=>({}));alert(e.detail||"Erro");throw new Error(e.detail||"Erro")}return r.json()}
+let cur=null,last=0,niches=[],ni=null,lastChat="";
+const nameOf=id=>(niches.find(n=>n.id==id)||{}).name||"";
+const pretty=k=>k.replace(/_/g," ").replace(/^./,c=>c.toUpperCase());
+
+// abas
+function tab(n){[1,2,3,4,5,6,7,8].forEach(i=>{$("v"+i).classList.toggle("hide",n!=i);$("t"+i).classList.toggle("on",n==i)});if(n==3)loadEnvio();if(n==4){loadFunil();loadOrders()}if(n==5)loadAvisos();if(n==6)loadRetomada();if(n==7)loadCustos();if(n==8){loadInteg();loadLgpd();loadPay()}}
+$("t1").onclick=()=>tab(1);$("t2").onclick=()=>tab(2);$("t3").onclick=()=>tab(3);[4,5,6,7,8].forEach(n=>$("t"+n).onclick=()=>tab(n));$("pw").onclick=()=>tab(5);$("pc").onclick=()=>tab(3);
+
+// nichos
+async function loadNiches(editor){niches=await api("/api/niches");if(ni==null||!niches.find(n=>n.id==ni))ni=(niches.find(n=>n.is_default)||niches[0]).id;
+ $("nl").innerHTML=niches.map(n=>`<div class="item ${n.id==ni?"sel":""}" data-i="${n.id}"><b>${esc(n.name)}</b>${n.is_default?' <span class="tag q">padrão</span>':""}<br><small>${n.leads} lead(s) · ativo + receptivo</small></div>`).join("");
+ $("nl").querySelectorAll(".item").forEach(e=>e.onclick=()=>{ni=+e.dataset.i;loadNiches(true)});
+ const keep=$("dn").value;$("dn").innerHTML='<option value="">Escolha o nicho…</option>'+niches.map(n=>`<option value="${n.id}">${esc(n.name)}</option>`).join("");$("dn").value=keep;
+ if(editor!==false)fillEditor()}
+function fillEditor(){const n=niches.find(x=>x.id==ni);if(!n)return;$("en").value=n.name;$("ek").value=n.keywords||"";$("ekb").value=n.knowledge||"";$("epz").checked=!!n.personalize;$("epb").value=n.prompt_b||"";$("eab").value=n.ab_pct||0;$("eabo").innerHTML="";salesReset();$("efu").checked=n.followup!==0&&n.followup!==false;$("edh").value=n.doc_hint||"";$("ep").value=n.prompt;$("eo").value=n.outbound_text;$("etp").value=n.template;$("el").value=n.template_lang;$("ed").checked=n.is_default;loadSales();loadMat();evLoad()}
+const body=()=>({name:$("en").value,keywords:$("ek").value,knowledge:$("ekb").value,personalize:$("epz").checked,prompt_b:$("epb").value,ab_pct:parseInt($("eab").value)||0,followup:$("efu").checked,doc_hint:$("edh").value,prompt:$("ep").value,outbound_text:$("eo").value,template:$("etp").value,template_lang:$("el").value,is_default:$("ed").checked});
+$("es_").onclick=async()=>{await api("/api/niches/"+ni,body(),"PUT");await loadNiches();flash("es","Salvo")};
+$("nn").onclick=async()=>{const nm=prompt("Nome do novo nicho (ex.: Energia solar):");if(!nm)return;const r=await api("/api/niches",{name:nm});ni=r.id;await loadNiches()};
+$("ec").onclick=async()=>{const r=await api("/api/niches",{name:$("en").value+" (cópia)",copy_from:ni});ni=r.id;await loadNiches()};
+$("ex").onclick=async()=>{if(!confirm("Excluir este nicho?"))return;await api("/api/niches/"+ni,null,"DELETE");ni=null;await loadNiches()};
+const runTest=async(mode,variant)=>{const r=await api("/api/test-lead",{niche_id:ni,mode,variant:variant||""});cur=r.phone;lastChat="";tab(1);tick()};
+$("et_").onclick=()=>runTest("ativo");$("et2").onclick=()=>runTest("receptivo");$("et3").onclick=()=>{if(!$("epb").value.trim()){alert("Preencha o prompt B e salve antes de testar.");return}runTest("receptivo","B")};
+
+// disparo
+$("open").onclick=()=>{$("dres").textContent="";loadLines();$("dlg").showModal()};$("dx").onclick=()=>$("dlg").close();
+$("dn").onchange=()=>{const n=niches.find(x=>x.id==$("dn").value);$("dpv").textContent=n?(n.template?`Template: ${n.template}\n\n`:"")+n.outbound_text.replace("{nome}","Maria").replace("{empresa}","sua empresa"):"Escolha um nicho para ver a mensagem."};
+$("dgo").onclick=async()=>{const id=+$("dn").value;if(!id){$("dres").textContent="Defina o nicho de atuação antes de disparar.";return}
+ const r=await api("/api/dispatch",{niche_id:id,lines:$("dl").value,consent:$("dc").checked,origem:$("dorig").value,line:multi()?$("dline").value:""});
+ $("dres").textContent=(r.queued?`${r.queued} contato(s) na fila. Acompanhe na aba Envio e conexão.`:"Nenhum contato novo (já estavam na fila).")+(r.suppressed?` ${r.suppressed} contato(s) ignorado(s) por terem pedido para sair.`:"");tick()};
+
+// carregar prompt/base de um arquivo .txt ou .md do computador
+let ldT=null;document.querySelectorAll(".ld").forEach(b=>b.onclick=()=>{ldT=b.dataset.t;$("lf").click()});
+$("lf").onchange=async()=>{const f=$("lf").files[0];$("lf").value="";if(!f||!ldT)return;const t=await f.text();
+ if($(ldT).value.trim()&&!confirm("Substituir o texto atual por este arquivo? (só vale depois de clicar em Salvar)"))return;$(ldT).value=t};
+// arquivos do lead
+$("fx").onclick=()=>$("fdlg").close();
+$("fb").onclick=async()=>{const fs=await api("/api/files/"+cur);$("fl").innerHTML=fs.length?fs.map(f=>`<div class="item" data-n="${esc(f.name)}">${esc(f.name)} <small>${new Date(f.ts*1e3).toLocaleString("pt-BR")}</small></div>`).join(""):'<div class="note">Nenhum arquivo recebido deste lead.</div>';
+ $("fl").querySelectorAll(".item").forEach(e=>e.onclick=async()=>{const r=await fetch(`/api/file/${cur}/${e.dataset.n}`,{headers:{"X-Token":T}});if(r.ok)window.open(URL.createObjectURL(await r.blob()),"_blank")});$("fdlg").showModal()};
+
+// envio e conexão
+const F=["min_delay","max_delay","batch_size","batch_pause_min","batch_pause_max","daily_limit","start_hour","end_hour","reply_delay_min","reply_delay_max","max_optout_pct"];
+let pcfg=null,editing=false;
+const mm=s=>s<60?s+"s":Math.round(s/60)+" min";
+let curLine="main",linesData=null,_lsig="";
+const lineName=id=>{const l=((linesData||{}).lines||[]).find(x=>x.id==id);return l?l.label:id};
+const multi=()=>linesData&&linesData.provider=="qr"&&linesData.lines.length>1;
+const DOT={open:"🟢",qr:"📷",connecting:"⏳",closed:"🔴",gateway_offline:"🔴"};
+async function loadLines(){try{const d=await api("/api/lines");linesData=d;const q=d.provider=="qr";
+ if(!d.lines.some(l=>l.id==curLine))curLine="main";
+ $("linebar").classList.toggle("hide",!(q&&d.lines.length>1));$("lineadd").classList.toggle("hide",!(q&&d.lines.length<d.max));
+ const sig=JSON.stringify([curLine,d.lines.map(l=>[l.id,l.label,l.active,l.state,l.sent_today,l.allowed_today,l.queued])]);
+ if(sig!==_lsig){_lsig=sig;
+  $("linebar").innerHTML=d.lines.map(l=>`<button class="tab${l.id==curLine?" on":""}" data-l="${esc(l.id)}">${DOT[l.state]||"⚪"} ${esc(l.label)}${l.active?"":" (pausado)"} · ${l.sent_today}/${l.allowed_today}</button>`).join("");
+  $("linebar").querySelectorAll("button").forEach(b=>b.onclick=()=>{curLine=b.dataset.l;_lsig="";window._qrh="";loadLines();loadConn()});
+  const l=d.lines.find(x=>x.id==curLine);
+  $("lineinfo").classList.toggle("hide",!(q&&l&&d.lines.length>1));
+  if(l)$("lineinfo").innerHTML=`${l.me?av("me",l.label,l.id,"sm")+" ":""}<b>${esc(l.label)}</b>${l.me?" (+"+esc(l.me)+")":""}: hoje ${l.sent_today} de ${l.allowed_today} · na fila ${l.queued} · ${l.active?"<button class='g' id='ln_tog'>Pausar este número</button>":"<button class='g' id='ln_tog'>Reativar este número</button>"}${l.id=="main"?"":" <button class='d' id='ln_rm'>Remover</button>"}${d.unassigned?`<br>${d.unassigned} contato(s) aguardam e serão divididos entre os números conectados.`:""}`;
+  if($("ln_tog"))$("ln_tog").onclick=async()=>{await api("/api/lines/"+encodeURIComponent(curLine),{active:!l.active},"PUT");_lsig="";loadLines()};
+  if($("ln_rm"))$("ln_rm").onclick=async()=>{if(confirm("Remover este número? A sessão do WhatsApp dele é encerrada e os contatos na fila dele serão divididos entre os outros números.")){await api("/api/lines/"+encodeURIComponent(curLine),null,"DELETE");curLine="main";_lsig="";window._qrh="";loadLines();loadConn()}}}
+ const sel=$("dline"),keep=sel.value;if(q&&d.lines.length>1){sel.innerHTML='<option value="auto">Automático (divide entre os números conectados)</option>'+d.lines.filter(l=>l.active).map(l=>`<option value="${esc(l.id)}">${esc(l.label)} ${DOT[l.state]||""}</option>`).join("");sel.value=[...sel.options].some(o=>o.value==keep)?keep:"auto"}
+ $("dlinebox").classList.toggle("hide",!(q&&d.lines.length>1))}catch(e){}}
+$("ln_add").onclick=async()=>{$("ln_msg").textContent="";try{const r=await api("/api/lines",{label:$("ln_label").value});$("ln_label").value="";curLine=r.id;_lsig="";window._qrh="";await loadLines();loadConn();flash("ln_msg","Número adicionado: escaneie o QR abaixo",6000)}catch(e){flash("ln_msg",(e&&e.message)||"Não foi possível adicionar",6000)}};
+async function loadConn(){try{await loadLines();const c=await api("/api/connection?line="+encodeURIComponent(curLine));const p=$("pc");
+ const L={open:"conectado",qr:"escaneie o QR",connecting:"conectando…",closed:"desconectado",gateway_offline:"gateway offline",sem_segredo:"sem GATEWAY_SECRET",simulado:"modo simulado"};
+ p.textContent=(c.provider=="qr"?"WhatsApp (QR): ":"WhatsApp (API): ")+(L[c.state]||c.state);p.className="pill "+(c.state=="open"?"on":"off");
+ if(multi()){const o=linesData.lines.filter(l=>l.state=="open").length,t=linesData.lines.length;p.textContent=`WhatsApp (QR): ${o}/${t} números conectados`;p.className="pill "+(o==t?"on":"off")}
+
+ let h="";if(c.provider=="qr"){h=c.state=="qr"&&c.qr?`<img src="${c.qr}" alt="QR code"><div><b>Escaneie com o WhatsApp</b><br><span class="note">No celular: WhatsApp > Aparelhos conectados > Conectar um aparelho (use o leitor de dentro do WhatsApp, não a câmera). O QR vale cerca de 20 segundos e renova sozinho. Se o celular recusar, veja a mensagem no terminal do gateway.</span></div>`
+  :c.state=="open"?`<div><b>Conectado${c.me?" como +"+esc(c.me):""}</b><br><button class="g" id="lo">Desconectar</button></div>`
+  :`<div class="note">${c.state=="gateway_offline"?"O gateway (pasta gateway/) não está rodando. Inicie com: npm start":"Aguardando conexão…"}</div>`}
+ else h=`<div class="note">Modo API oficial da Meta (${esc(c.state)}). Para usar QR code, defina PROVIDER=qr no .env e rode o gateway.</div>`;
+ if(h!==window._qrh){window._qrh=h;$("qrbox").innerHTML=h}
+ $("pairbox").classList.toggle("hide",!(c.provider=="qr"&&c.state=="qr"));if($("lo"))$("lo").onclick=async()=>{if(confirm("Desconectar este número?")){await api("/api/connection/logout?line="+encodeURIComponent(curLine),{});loadConn()}}}catch(e){}}
+async function loadEnvio(){loadConn();const m=await api("/api/metrics"),c=await api("/api/pacing");
+ $("mrisk").textContent="Risco estimado: "+m.risk;
+ const K=[["Enviados hoje",`${m.sent_today} / ${m.allowed_today}`],["Na fila",m.queued],["Falhas hoje",m.failed_today],["Resposta (7d)",m.reply_pct+"%"],["Saídas/descartes (7d)",m.optout_pct+"%"],["Próximo envio em",m.paused||m.autopause?"pausado":!m.window_open?"fora da janela":mm(m.next_in)],["Intervalo médio",m.avg_gap?mm(m.avg_gap):"—"],["Janela agora",m.window_open?"aberta":"fechada"]];
+ $("kpis").innerHTML=K.map(([a,b])=>`<div class="kpi"><small>${a}</small><b>${b}</b></div>`).join("");
+ const mx=Math.max(1,...m.hourly);$("bars").innerHTML=m.hourly.map((v,h)=>`<i title="${h}h: ${v}" style="height:${Math.max(3,v/mx*100)}%"></i>`).join("");
+ $("bn").innerHTML=m.by_niche.length?m.by_niche.map(n=>`<tr><td>${esc(n.name)}</td><td>${n.sent}</td><td>${n.replied}${n.sent?" ("+Math.round(n.replied*100/n.sent)+"%)":""}</td></tr>`).join(""):'<tr><td colspan="3" class="note">Sem envios nos últimos 7 dias.</td></tr>';
+ pcfg=c;if(!editing){F.forEach(k=>$("p_"+k).value=c[k]);$("p_warmup").checked=c.warmup;$("p_weekdays_only").checked=c.weekdays_only}
+ $("wu").textContent=c.warmup_start;$("ppause").textContent=c.paused?"Retomar envios":"Pausar envios";
+ $("apause").innerHTML=c.autopause?`<div class="warn"><b>Envios pausados automaticamente:</b> ${esc(c.autopause)}. Revise antes de retomar.</div>`:c.paused?'<div class="warn">Envios pausados pelo operador.</div>':"";
+ $("pinfo").textContent=`Fuso: ${c.tz}. Limite de hoje: ${c.allowed_today}. Pisos de segurança: intervalo mínimo 20 s, máximo 300 contatos novos por dia.`;
+ const q=await api("/api/outbox");$("bq").innerHTML=q.length?q.map(o=>`<tr><td>${esc(o.name||o.phone)}</td><td>${esc(o.niche||"")}</td><td>${o.status}${o.error?" · "+esc(o.error):""}${multi()&&o.line?" · "+esc(lineName(o.line)):""}</td></tr>`).join(""):'<tr><td colspan="3" class="note">Fila vazia.</td></tr>'}
+$("pg").onclick=async()=>{$("pcode").textContent="…";try{const r=await api("/api/connection/pair?line="+encodeURIComponent(curLine),{phone:$("pn").value});$("pcode").style.fontSize="28px";$("pcode").textContent=r.code}catch(e){$("pcode").style.fontSize="13px";$("pcode").textContent=(e&&e.message)||"Não foi possível gerar o código"}};
+document.querySelectorAll("#v3 input").forEach(i=>{if(i.id!="pn")i.oninput=()=>editing=true});
+$("psave").onclick=async()=>{const b={};F.forEach(k=>b[k]=$("p_"+k).value);b.warmup=$("p_warmup").checked;b.weekdays_only=$("p_weekdays_only").checked;await api("/api/pacing",b,"PUT");editing=false;loadEnvio()};
+$("ppause").onclick=async()=>{await api("/api/outbox/pause",{paused:!pcfg.paused&&!pcfg.autopause});loadEnvio()};
+$("pclear").onclick=async()=>{if(confirm("Remover todos os contatos que ainda estão na fila?")){await api("/api/outbox/clear",{});loadEnvio()}};
+setInterval(()=>{if(!$("v3").classList.contains("hide"))loadEnvio()},5000);setInterval(loadConn,2500);loadConn();
+// aceite do risco do modo QR (obrigatório) e aviso do operador
+$("qrdlg").addEventListener("cancel",e=>e.preventDefault());
+async function checkQr(){try{const a=await api("/api/qr-ack");if(a.required&&!a.accepted){if(!$("qrdlg").open){$("qrterms").innerHTML=a.terms.map(t=>`<li>${esc(t)}</li>`).join("");$("qrdlg").showModal()}}else if($("qrdlg").open)$("qrdlg").close()}catch(e){}}
+$("qrgo").onclick=async()=>{$("qrerr").textContent="";if(!$("qrok").checked||$("qrname").value.trim().length<3){$("qrerr").textContent="Marque que leu e aceita e informe o seu nome completo.";return}
+ try{await api("/api/qr-ack",{accept:true,name:$("qrname").value});$("qrdlg").close();loadConn()}catch(e){}};
+checkQr();setInterval(checkQr,30000);
+async function loadNotice(){try{const d=await api("/api/operator-notice"),n=d.notice,b=$("opn");b.classList.toggle("hide",!n);if(n){b.textContent=n.text;b.style.background=n.level=="error"?"var(--er)":n.level=="warn"?"var(--wr)":"var(--in)";b.style.color=n.level=="info"?"var(--tx)":"#fff"}}catch(e){}}
+loadNotice();setInterval(loadNotice,60000);
+// LGPD
+async function loadLgpd(){try{const g=await api("/api/lgpd");$("lgn").textContent=g.suppressed+" número(s) na lista de quem não deve receber mensagens (guardados só como código, sem o telefone).";
+ $("lgl").innerHTML=g.log.length?g.log.map(r=>`<tr><td>${new Date(r.ts*1e3).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</td><td>${esc(r.action)}${r.detail?": "+esc(r.detail):""}</td></tr>`).join(""):'<tr><td colspan="2" class="note">Nenhum registro ainda.</td></tr>'}catch(e){}}
+$("sup_go").onclick=async()=>{const r=await api("/api/lgpd/suppress",{lines:$("sup_l").value});$("sup_l").value="";flash("sup_m",r.added+" número(s) adicionado(s)",4000);loadLgpd()};
+
+// importar planilha de contatos
+$("tpl").onclick=e=>{e.preventDefault();const b=new Blob(["\ufeffnome,whatsapp,empresa,contexto\nMaria Silva,11999999999,Padaria Exemplo,pediu cotação\n"],{type:"text/csv"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="modelo-contatos.csv";a.click()};
+$("upb").onclick=()=>$("upf").click();
+$("upf").onchange=async()=>{const f=$("upf").files[0];$("upf").value="";if(!f)return;if(f.size>5e6){$("upres").textContent="Arquivo maior que 5 MB";return}
+ $("upres").textContent="Lendo a planilha…";
+ try{const data=await new Promise((ok,er)=>{const r=new FileReader();r.onload=()=>ok(r.result.split(",")[1]);r.onerror=er;r.readAsDataURL(f)});
+  const r=await api("/api/contacts/parse",{filename:f.name,data});$("dl").value=r.lines;
+  const erros=r.issues.filter(i=>i.kind=="erro").length;
+  let h=`<b>${r.valid} contato(s) pronto(s) para disparar</b> (de ${r.total} linha(s)). Colunas lidas: ${Object.entries(r.columns).map(([k,v])=>esc(v)).join(", ")}.`;
+  if(r.capped)h+=" <b>Só os primeiros 2000 entraram; envie o restante depois.</b>";
+  if(r.issue_count)h+=`<br>${r.issue_count} linha(s) com observação:<br>`+r.issues.slice(0,8).map(i=>`linha ${i.row}: ${esc(i.value)} · ${esc(i.reason)}`).join("<br>")+(r.issue_count>8?"<br>…":"");
+  $("upres").innerHTML=h}catch(e){$("upres").textContent=""}};
+
+// fotos de perfil (WhatsApp); sem foto, iniciais coloridas
+const AV={};
+function avInit(n){n=String(n||"?").replace(/[^\p{L}\p{N} ]/gu,"").trim();const p=n.split(/\s+/).filter(Boolean);return ((p[0]||"?")[0]+(p.length>1?p[p.length-1][0]:"")).toUpperCase()}
+function avColor(n){let h=0;for(const c of String(n))h=(h*31+c.charCodeAt(0))>>>0;return `hsl(${h%360} 38% 42%)`}
+function av(who,name,line,sz){const k=who+"|"+(line||"");const u=AV[k];
+ if(u===undefined&&who){AV[k]=null;fetch(`/api/avatar/${encodeURIComponent(who)}?line=${encodeURIComponent(line||"")}`,{headers:{"X-Token":T}}).then(async r=>{AV[k]=r.ok?URL.createObjectURL(await r.blob()):false;if(r.ok){lastChat="";window._lsig2="";if(typeof _lsig!="undefined")_lsig=""}}).catch(()=>{AV[k]=false})}
+ const cls="av "+(sz||"")+(u?" has":"");return `<span class="${cls}" data-i="${esc(avInit(name))}" style="--c:${avColor(name||who)}" aria-hidden="true">${u?`<img alt="" src="${u}">`:""}</span>`}
+function meOf(line){const l=(linesData&&linesData.lines||[]).find(x=>x.id==(line||"main"));return l||{}}
+// conversas
+async function tick(){
+ if(!linesData&&!window._ll){window._ll=1;loadLines()}
+ const leads=await api("/api/leads");window._leads=leads;if(!cur&&leads[0])cur=leads[0].phone;if($("ndet").open&&window._nc!=cur){window._nc=cur;loadNotesA()}
+ $("leads").innerHTML=leads.map(l=>`<div class="item ${l.phone==cur?"sel":""}" data-p="${l.phone}">${av(l.phone,l.name||l.phone,"")}<b>${esc(l.name||l.phone)}</b>${l.test?" <span class='tag'>teste</span>":""}<br><small>${esc(l.company||l.phone)}</small><br><span class="tag ${/qualificado|reuniao|encaminhado/.test(l.stage)?"q":/humano|descartado/.test(l.stage)?"h":""}">${l.stage}</span>${(()=>{try{const t=JSON.parse(l.bant||"{}").temperatura;return t?`<span class="tag ${t=="quente"?"q":t=="frio"?"h":""}">${esc(t)}</span>`:""}catch(e){return""}})()}<span class="tag">${esc(l.niche||"")}</span><span class="tag">${l.origin=="receptivo"?"Receptivo":"Ativo"}</span></div>`).join("");
+ document.querySelectorAll("#leads .item").forEach(e=>e.onclick=()=>{cur=e.dataset.p;lastChat="";tick()});
+ const L=leads.find(l=>l.phone==cur);
+ if(!L){$("fb").style.display=$("lx").style.display=$("ld").style.display=$("tq").style.display="none"}
+ if(L){$("ct").innerHTML=av(L.phone,L.name||L.phone,"","sm")+" "+esc((L.name||L.phone)+(L.human?" · IA pausada":"")+(L.human&&L.agent_id>0?" · com "+(L.agent_name||"atendente"):L.human&&L.agent_id==-1?" · com você (painel)":L.human&&!L.agent_id?" · na fila da equipe":""));$("tq").style.display=L.human&&L.agent_id==-1||!L.human?"":"none";$("tq").onclick=async()=>{await api(`/api/leads/${L.phone}/handoff`,{});tick()};$("fb").style.display="";$("lx").style.display="";$("ld").style.display="";$("lx").onclick=()=>dl(`/api/leads/${L.phone}/export`,`dados-${L.phone}.json`);$("ld").onclick=async()=>{if(!confirm("Apagar TODOS os dados deste contato (mensagens, arquivos, etapas, avisos)? Isso não pode ser desfeito. Se ele pediu SAIR, o número continua na lista para não receber mensagens."))return;const r=await api(`/api/leads/${L.phone}`,null,"DELETE");alert("Dados apagados."+(r.crm_externo?" Atenção: este contato também foi enviado ao seu CRM; apague lá também.":""));cur=null;lastChat="";tick()};const t=$("tk");t.style.display="";t.textContent=L.human?"Retomar IA":"Assumir conversa";t.onclick=async()=>{await api(`/api/leads/${L.phone}/takeover`,{human:!L.human});tick()};
+  const b=JSON.parse(L.bant||"{}");const rows=[["Nicho",L.niche||"—"],["Origem",L.origin=="receptivo"?"Receptivo (ele chamou)":"Ativo (disparo)"],["Estágio",L.stage],...Object.entries(b).map(([k,v])=>[pretty(k),v]),["Reunião",L.meeting||"—"]];
+  $("crm").innerHTML=rows.map(([a,v])=>`<div><span>${esc(a)}</span><span>${esc(v)}</span></div>`).join("");
+  renderOutcome(L);
+  const m=await api("/api/messages/"+cur),j=JSON.stringify(m);
+  if(j!=lastChat){lastChat=j;const op=meOf(L.line);$("chat").innerHTML=m.map(x=>{const lead=x.role=="lead",who=lead?(L.name||L.phone):(x.role=="humano"?(x.agent||"Operador"):(op.label||"SDR"));
+   return `<div class="mrow ${lead?"l":"s"}">${lead?av(L.phone,L.name||L.phone,"","sm"):(x.role=="humano"&&x.agent?av("",x.agent,"","sm"):av("me",x.role=="humano"?"Operador":(op.label||"SDR"),L.line||"main","sm"))}<div class="msg ${lead?"l":"s"}" title="${esc(who)}">${esc(x.text)}<time>${new Date(x.ts*1e3).toLocaleTimeString("pt-BR")}${lead?"":" · "+(x.role=="humano"?(x.agent||"operador"):"IA")}${x.kind=="falha"?" · <b style='color:#c0392b'>não enviada</b>":""}</time></div></div>`}).join("");$("chat").scrollTop=1e9}}
+ else {$("oc").classList.add("hide");$("chat").innerHTML='<div class="note" style="padding:12px">Nenhum lead ainda. Use Disparar, ou abra Agentes e clique em "Testar ativo" ou "Testar receptivo".</div>'}
+ const ev=await api("/api/events?after="+last);
+ ev.forEach(e=>{last=Math.max(last,e.id);const d=document.createElement("div");d.className="ev";d.innerHTML=`<time>${new Date(e.ts*1e3).toLocaleTimeString("pt-BR")}</time><span class="k ${e.kind}">${e.kind.toUpperCase()}</span> ${esc(e.text)}`;$("log").prepend(d)});
+}
+$("sim").onclick=async()=>{const t=$("mi").value.trim();if(!t||!cur)return;$("mi").value="";await api("/api/simulate",{phone:cur,text:t})};
+$("sug").onclick=async()=>{if(!cur)return;const b=$("sug");b.disabled=true;b.textContent="Pensando…";try{const r=await api(`/api/leads/${cur}/suggest`,{});$("mi").value=r.text;$("mi").focus()}finally{b.disabled=false;b.textContent="Sugerir resposta"}};
+$("simf").onclick=()=>{if(cur)$("ff").click()};
+$("ff").onchange=async()=>{const f=$("ff").files[0];$("ff").value="";if(!f||!cur)return;if(f.size>8e6){alert("Arquivo maior que 8 MB");return}
+ const b=$("simf");b.disabled=true;b.textContent="Enviando…";
+ try{const data=await new Promise((ok,er)=>{const r=new FileReader();r.onload=()=>ok(r.result.split(",")[1]);r.onerror=er;r.readAsDataURL(f)});
+  await api("/api/simulate-file",{phone:cur,filename:f.name,mime:f.type||"",data})}finally{b.disabled=false;b.textContent="Anexar arquivo (teste)"}};
+// emojis
+const EM={"😀":"😀 😁 😂 🤣 😊 😍 😘 😉 😎 🤗 🤔 😅 😢 😭 😡 🙄 😴 🙂 🙃 😇 🥳 😬 🤩 😌","👍":"👍 👎 👏 🙏 🤝 👌 ✌️ 🤞 💪 👋 🙌 🤙 ☝️ 👇 👉 👈 ✍️ 🤌","❤️":"❤️ 💙 💚 💛 🔥 ⭐ ✨ 💯 ✅ ❌ ⚠️ ❗ ❓ 🎉 🎯 📌 💡 ⏰ 📅 🚀 🔔","📱":"📱 💻 📧 📞 📄 📎 📷 📝 🔒 💰 🏠 🚗 🚦 🏥 🩺 💳 📍 🕒"};
+function ins(e){const i=$("mi"),s=i.selectionStart??i.value.length,t=i.selectionEnd??s;i.value=i.value.slice(0,s)+e+i.value.slice(t);i.focus();const p=s+e.length;i.setSelectionRange(p,p)}
+function emTab(k){$("emt").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.k==k));$("emg").innerHTML=EM[k].split(" ").map(e=>`<button type="button">${e}</button>`).join("");$("emg").querySelectorAll("button").forEach(b=>b.onclick=()=>ins(b.textContent))}
+$("emt").innerHTML=Object.keys(EM).map(k=>`<button type="button" data-k="${k}">${k}</button>`).join("");$("emt").querySelectorAll("button").forEach(b=>b.onclick=()=>emTab(b.dataset.k));emTab("😀");
+$("emo").onclick=e=>{e.stopPropagation();$("emop").classList.toggle("hide")};
+document.addEventListener("click",e=>{if(!$("emop").contains(e.target))$("emop").classList.add("hide")});
+$("snd").onclick=async()=>{const t=$("mi").value.trim();if(!t||!cur)return;$("mi").value="";await api(`/api/leads/${cur}/send`,{text:t});tick()};
+$("mi").onkeydown=e=>{if(e.key=="Enter")$("snd").click()};
+
+// resultado do lead
+const OUT={cotacao_enviada:"Cotação enviada",ganho:"Ganho",perdido:"Perdido"};
+const ago=ts=>{const m=Math.max(0,Math.round((Date.now()/1e3-ts)/60));return m<60?m+" min":m<1440?Math.round(m/60)+" h":Math.round(m/1440)+" d"};
+function renderOutcome(L){const o=$("oc");if(L.test){o.classList.add("hide");return}o.classList.remove("hide");
+ const wait=L.alerted_at&&!L.handled_at&&/encaminhado|humano|reuniao/.test(L.stage);
+ const mt=L.meeting_start?`<div class="st">📅 Reunião: ${new Date(L.meeting_start).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"})}</div>`:"";
+ o.innerHTML=mt+`<div class="st">${wait?"⏰ Aguardando atendimento há "+ago(L.alerted_at):L.handled_at?"✅ Atendido":"Resultado do lead"}${L.outcome?" · <b>"+OUT[L.outcome]+"</b>"+(L.outcome_reason?" ("+esc(L.outcome_reason)+")":""):""}${L.followups_sent?" · "+L.followups_sent+" retomada(s) enviada(s)":""}</div>`+
+  (wait?'<button data-a="h">Marcar atendido</button>':"")+Object.keys(OUT).map(k=>`<button class="g" data-o="${k}">${OUT[k]}</button>`).join("")+(L.outcome?'<button class="g" data-o="">Reabrir</button>':"")+(L.meeting_start?'<button class="g" data-m="ics">Baixar .ics</button><button class="g" data-m="gc">Google Agenda</button>':"");
+ o.querySelectorAll("button").forEach(b=>b.onclick=async()=>{if(b.dataset.m){if(b.dataset.m=="ics")await dl(`/api/leads/${L.phone}/meeting.ics`,"reuniao.ics");else window.open(gcal(L),"_blank");return}if(b.dataset.a){await api(`/api/leads/${L.phone}/handled`,{})}else{let r="";if(b.dataset.o=="perdido")r=prompt("Motivo (opcional):")||"";await api(`/api/leads/${L.phone}/outcome`,{outcome:b.dataset.o,reason:r})}tick();pollWait()})}
+async function pollWait(){try{const a=await api("/api/alerts");const n=a.waiting.length;$("pw").textContent="⏰ "+n+" aguardando atendimento";$("pw").classList.toggle("hide",!n)}catch(e){}}
+setInterval(pollWait,15000);pollWait();
+
+// funil
+async function loadFunil(){const f=await api("/api/funnel?days="+$("fd").value);
+ const mx=Math.max(1,f.steps[0].count);
+ $("fsteps").innerHTML=f.steps.map((s,i)=>`<div class="fr"><span>${esc(s.label)}</span><div class="bk"><i style="width:${s.count*100/mx}%"></i></div><span><b>${s.count}</b> <small>${i?s.pct_prev+"% da etapa anterior":""}</small></span></div>`).join("")||"";
+ $("fside").innerHTML=[["Conversão total",f.steps[4].pct_total+"%"],["Reuniões",f.side.reunioes],["Pediram humano",f.side.humano],["Descartados/SAIR",f.side.descartados],["Sem resposta",f.side.sem_resposta],["Perdidos",f.side.perdidos],["Aguardando corretor",f.waiting]].map(([a,b])=>`<div class="kpi"><small>${a}</small><b>${b}</b></div>`).join("");
+ $("fnote").textContent=f.total?"Ganhos e perdidos dependem de você marcar o resultado em cada lead (botões na aba Conversas). Leads de teste não entram.":"Ainda não há leads no período. Leads de teste não entram.";
+ const t=f.times,fm=(v,u)=>v==null?"—":v+" "+u;
+ $("ftimes").innerHTML=[["1ª resposta do lead (mediana)",fm(t.first_reply_min,"min")],["Até qualificar (mediana)",fm(t.qualify_h,"h")],["Até o corretor atender (mediana)",fm(t.attend_min,"min")]].map(([a,b])=>`<div class="kpi"><small>${a}</small><b>${b}</b></div>`).join("");
+ const dm=Math.max(1,...f.daily.map(d=>Math.max(d.leads,d.encaminhados)));
+ $("fdaily").innerHTML=f.daily.map(d=>`<div title="${d.day}: ${d.leads} lead(s), ${d.encaminhados} encaminhado(s)"><i class="a" style="height:${Math.max(2,d.leads/dm*100)}%"></i><i class="b" style="height:${Math.max(2,d.encaminhados/dm*100)}%"></i></div>`).join("");
+ $("fniche").innerHTML=f.by_niche.length?f.by_niche.map(n=>`<tr><td>${esc(n.niche)}</td><td>${n.leads}</td><td>${n.responderam}</td><td>${n.qualificados}</td><td>${n.encaminhados}</td><td>${n.ganhos}</td></tr>`).join(""):'<tr><td colspan="6" class="note">Sem dados.</td></tr>';
+ $("ffu").textContent=f.followups.sent?`Retomadas automáticas: ${f.followups.sent} enviada(s), ${f.followups.replied} com resposta em até 3 dias (${f.followups.reply_pct}%).`:"Nenhuma retomada automática enviada no período."}
+$("fd").onchange=loadFunil;
+
+// avisos
+const AK=["sla_min","repeat_min","max_reminders","start_hour","end_hour"],AB=["enabled","on_encaminhado","on_humano","on_reuniao","on_resposta"];
+let aEdit=false;
+
+
+// verificar instalação (kit de piloto)
+async function runDiag(){$("dgsum").textContent="Verificando…";$("dgl").innerHTML="";$("dgrun").disabled=true;
+ try{const d=await api("/api/diagnostico");const ic={ok:"✅",aviso:"⚠️",erro:"❌"};
+  $("dgsum").innerHTML=d.ready?`<b>Pronto para o piloto.</b> ${d.summary.aviso?d.summary.aviso+" aviso(s) para olhar.":"Tudo certo."}`:`<b style="color:var(--bad)">${d.summary.erro} problema(s) a resolver antes do piloto.</b> ${d.summary.aviso} aviso(s).`;
+  const ord={erro:0,aviso:1,ok:2};$("dgl").innerHTML=d.checks.slice().sort((a,b)=>ord[a.status]-ord[b.status]).map(c=>`<div style="display:flex;gap:10px;padding:8px 2px;border-bottom:1px solid var(--bd)"><span>${ic[c.status]}</span><div><b>${esc(c.label)}</b> <span class="note">${esc(c.detail)}</span>${c.fix?`<div class="note" style="color:var(--tx)">→ ${esc(c.fix)}</div>`:""}</div></div>`).join("")}
+ catch(e){$("dgsum").textContent="Não foi possível verificar: "+((e&&e.message)||"erro")}finally{$("dgrun").disabled=false}}
+$("pdg").onclick=()=>{$("dgdlg").showModal();runDiag()};$("dgrun").onclick=runDiag;$("dgx").onclick=()=>$("dgdlg").close();
+// equipe de atendimento (transferência para humano)
+async function loadTeam(){try{const d=await api("/api/agents");$("tm_url").textContent=location.origin+"/atendente";
+ $("tms").textContent=d.queue?`${d.queue} na fila`:"";
+ $("tm_list").innerHTML=d.agents.length?'<table><tbody>'+d.agents.map(a=>`<tr data-id="${a.id}"><td>${av("",a.name,"","sm")}</td><td><b>${esc(a.name)}</b><br><small>${esc(a.login)}</small></td><td>${!a.active?'<span class="tag h">desativado</span>':a.online?'<span class="tag q">disponível</span>':a.present?'<span class="tag">ausente</span>':'<span class="tag">offline</span>'}</td><td>${a.load}/${a.max_chats}</td><td style="white-space:nowrap"><button class="g" data-a="pw">Nova senha</button> <button class="g" data-a="tog">${a.active?"Desativar":"Ativar"}</button> <button class="d" data-a="del">Excluir</button></td></tr>`).join("")+'</tbody></table>':'<div class="note">Nenhum atendente ainda. Sem atendentes, a transferência continua como antes: a IA pausa e avisa a equipe pelo WhatsApp.</div>';
+ $("tm_list").querySelectorAll("button").forEach(b=>b.onclick=async()=>{const id=b.closest("tr").dataset.id,a=d.agents.find(x=>x.id==id);
+  try{if(b.dataset.a=="del"){if(!confirm("Excluir "+a.name+"? As conversas dele voltam para a fila."))return;await api("/api/agents/"+id,null,"DELETE")}
+   else if(b.dataset.a=="tog"){await api("/api/agents/"+id,{name:a.name,max_chats:a.max_chats,active:!a.active},"PUT")}
+   else{const pw=prompt("Nova senha para "+a.name+" (mín. 6 caracteres). Ele será desconectado.");if(!pw)return;await api("/api/agents/"+id,{name:a.name,max_chats:a.max_chats,active:a.active,password:pw},"PUT");flash("tm_msg","Senha alterada")}
+   loadTeam()}catch(e){}});
+ if(!window._hoEdit){$("ho_auto").checked=d.config.auto_assign;$("ho_fb").value=d.config.fallback;$("ho_wait").value=d.config.wait_min;$("ho_re").value=d.config.reassign_min}}catch(e){}}
+$("tm_add").onclick=async()=>{try{const r=await api("/api/agents",{name:$("tm_name").value,login:$("tm_login").value,password:$("tm_pw").value,max_chats:parseInt($("tm_max").value)||5});
+ $("tm_msg").textContent=`Criado. Usuário: ${r.login} · Senha: ${r.password} (anote agora, ela não aparece de novo).`;["tm_name","tm_login","tm_pw"].forEach(i=>$(i).value="");loadTeam()}catch(e){}};
+["ho_auto","ho_fb","ho_wait","ho_re"].forEach(i=>$(i).oninput=()=>{window._hoEdit=true});
+$("ho_save").onclick=async()=>{await api("/api/handoff",{auto_assign:$("ho_auto").checked,fallback:$("ho_fb").value,wait_min:$("ho_wait").value,reassign_min:$("ho_re").value},"PUT");window._hoEdit=false;flash("tm_msg","Regras salvas");loadTeam()};
+
+const FMTS=s=>s==null?"—":s<90?s+" s":s<5400?Math.round(s/60)+" min":(s/3600).toFixed(1)+" h";
+async function loadHours(){try{const d=await api("/api/hours");if(window._hrEdit)return;$("hr_on").checked=d.config.enabled;$("hr_msg").value=d.config.message;
+ $("hr_days").innerHTML=d.day_names.map((n,i)=>{const x=d.config.days[i];return `<div class="row" style="align-items:center;gap:6px"><label style="width:70px;margin:0"><input type="checkbox" data-hd="${i}" ${x?"checked":""}> ${n}</label><input type="time" data-hs="${i}" value="${x?x[0]:"09:00"}" style="width:110px"> às <input type="time" data-he="${i}" value="${x?x[1]:"18:00"}" style="width:110px"></div>`}).join("");
+ $("hr_days").oninput=$("hr_on").oninput=$("hr_msg").oninput=()=>{window._hrEdit=true}}catch(e){}}
+$("hr_save").onclick=async()=>{const days=[0,1,2,3,4,5,6].map(i=>document.querySelector(`[data-hd="${i}"]`).checked?[document.querySelector(`[data-hs="${i}"]`).value,document.querySelector(`[data-he="${i}"]`).value]:null);
+ try{await api("/api/hours",{enabled:$("hr_on").checked,days,message:$("hr_msg").value},"PUT");window._hrEdit=false;flash("hr_m","Salvo");loadHours()}catch(e){flash("hr_m",e.message,6000)}};
+async function loadQuick(){try{const q=await api("/api/quick");QK=q;$("qk_list").innerHTML=q.map(x=>`<div class="row" style="align-items:center"><div style="flex:1"><b>${esc(x.title)}</b><br><small class="note">${esc(x.body)}</small></div><button class="d" data-qd="${x.id}">Apagar</button></div>`).join("")||'<div class="note">Nenhuma ainda.</div>';
+ $("qk_list").querySelectorAll("[data-qd]").forEach(b=>b.onclick=async()=>{await api("/api/quick/"+b.dataset.qd,null,"DELETE");loadQuick()});
+ $("qrd").innerHTML='<option value="">Respostas rápidas…</option>'+q.map((x,i)=>`<option value="${i}">${esc(x.title)}</option>`).join("");$("qrd").style.display=q.length?"":"none"}catch(e){}}
+let QK=[];
+$("qk_add").onclick=async()=>{try{await api("/api/quick",{title:$("qk_t").value,body:$("qk_b").value});$("qk_t").value=$("qk_b").value="";loadQuick()}catch(e){flash("qk_m",e.message,5000)}};
+$("qrd").onchange=()=>{const q=QK[+$("qrd").value];$("qrd").value="";if(!q)return;const L=(window._leads||[]).find(x=>x.phone==cur)||{};const first=((L.name||"").trim().split(/\s+/)[0])||"";
+ const m=$("mi");m.value=(m.value?m.value+" ":"")+q.body.replace(/\{nome\}/g,first).replace(/\{atendente\}/g,"");m.focus()};
+async function loadMetrics(){try{const d=await api("/api/agents/metrics?days="+$("mt_days").value);$("mt_l").innerHTML=d.agents.map(a=>`<tr><td>${esc(a.name)}${a.active?"":" <span class='tag h'>inativo</span>"}</td><td>${a.handled}</td><td>${a.messages}</td><td>${FMTS(a.first_reply_s)}</td><td>${FMTS(a.queue_wait_s)}</td><td>${a.won} / ${a.lost}</td></tr>`).join("")||'<tr><td colspan="6" class="note">Sem atendentes.</td></tr>'}catch(e){}}
+$("mt_days").onchange=loadMetrics;
+async function loadNotesA(){const p=cur;if(!p)return;try{const n=await api("/api/notes/"+p);if(p!=cur)return;$("ndn").textContent=n.length?`(${n.length})`:"";$("ndl").innerHTML=n.map(x=>`<div style="margin:4px 0"><b>${esc(x.author)}</b> <small class="note">${new Date(x.ts*1e3).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</small> <a href="#" data-nd="${x.id}">apagar</a><br>${esc(x.text)}</div>`).join("")||'<div class="note">Nenhuma nota.</div>';
+ $("ndl").querySelectorAll("[data-nd]").forEach(a=>a.onclick=async e=>{e.preventDefault();await api("/api/notes/item/"+a.dataset.nd,null,"DELETE");loadNotesA()})}catch(e){}}
+$("ndadd").onclick=async()=>{const t=$("ndi").value.trim();if(!t||!cur)return;try{await api("/api/notes/"+cur,{text:t});$("ndi").value="";loadNotesA()}catch(e){alert(e.message)}};
+$("ndet").ontoggle=()=>{if($("ndet").open){window._nc=cur;loadNotesA()}};
+
+async function gcLoad(){try{const g=await api("/api/gcal");if(window._gcEdit)return;const c=g.config;$("gc_on").checked=c.enabled;$("gc_id").value=c.calendar_id;$("gc_dur").value=c.duration_min;$("gc_not").value=c.notice_min;$("gc_hor").value=c.horizon_days;$("gc_step").value=c.step_min;$("gc_title").value=c.title;
+ $("gc_sa").textContent=g.has_sa?"(salva: "+g.sa_email+" — compartilhe a agenda com este e-mail)":"(nenhuma)";$("gcs").textContent=g.ready?"(ativo)":"";
+ $("gc_days").innerHTML=g.day_names.map((n,i)=>{const x=c.days[i];return `<div class="row" style="align-items:center;gap:6px"><label style="width:70px;margin:0"><input type="checkbox" data-gd="${i}" ${x?"checked":""}> ${n}</label><input type="time" data-gs="${i}" value="${x?x[0]:"09:00"}" style="width:110px"> às <input type="time" data-ge="${i}" value="${x?x[1]:"18:00"}" style="width:110px"></div>`}).join("");
+ ["gc_on","gc_id","gc_json","gc_dur","gc_not","gc_hor","gc_step","gc_title","gc_days"].forEach(i=>$(i).oninput=()=>{window._gcEdit=true})}catch(e){}}
+function gcBody(){return {enabled:$("gc_on").checked,calendar_id:$("gc_id").value,sa_json:$("gc_json").value,duration_min:$("gc_dur").value,notice_min:$("gc_not").value,horizon_days:$("gc_hor").value,step_min:$("gc_step").value,title:$("gc_title").value,
+ days:[0,1,2,3,4,5,6].map(i=>document.querySelector(`[data-gd="${i}"]`).checked?[document.querySelector(`[data-gs="${i}"]`).value,document.querySelector(`[data-ge="${i}"]`).value]:null)}}
+$("gc_save").onclick=async()=>{try{await api("/api/gcal",gcBody(),"PUT");window._gcEdit=false;$("gc_json").value="";flash("gc_m","Salvo");gcLoad()}catch(e){flash("gc_m",e.message,7000)}};
+$("gc_rm").onclick=async()=>{if(!confirm("Remover a conta de serviço? O agente deixa de usar a agenda."))return;try{await api("/api/gcal",{...gcBody(),enabled:false,sa_json:"",remove_sa:true},"PUT");window._gcEdit=false;gcLoad()}catch(e){flash("gc_m",e.message,6000)}};
+$("gc_test").onclick=async()=>{$("gc_m").textContent="Testando…";try{const r=await api("/api/gcal/test",{});$("gc_m").textContent=r.ok?`Conectado à agenda "${r.calendar}". Próximos horários livres: ${r.slots.join(", ")||"nenhum"}`:r.error}catch(e){$("gc_m").textContent=e.message}};
+async function loadAvisos(){loadDigest();loadTeam();loadHours();loadQuick();loadMetrics();const a=await api("/api/alerts"),c=a.config;
+ if(!aEdit){AB.forEach(k=>$("a_"+k).checked=!!c[k]);AK.forEach(k=>$("a_"+k).value=c[k]);$("a_whatsapp_to").value=c.whatsapp_to.split(",").filter(Boolean).join(", ")};$("a_wavs").innerHTML=c.whatsapp_to.split(",").filter(Boolean).map(n=>`<span style="display:inline-flex;gap:5px;align-items:center;font-size:12px">${av(n,n,"main","sm")}+${esc(n)}</span>`).join("")
+ const ch=a.channels;$("ach").innerHTML="Canais ativos: "+[["WhatsApp",ch.whatsapp],["E-mail"+(a.email_to.length?" ("+a.email_to.map(esc).join(", ")+")":""),ch.email],["Slack/Discord (webhook)",ch.webhook]].map(([n,o])=>`<span class="tag ${o?"q":""}">${o?"✓":"✗"} ${n}</span>`).join(" ");
+ $("aw").innerHTML=a.waiting.length?a.waiting.map(w=>`<div class="item" data-p="${w.phone}"><b>${esc(w.name||w.phone)}</b> <span class="tag h">${w.stage}</span><br><small>${esc(w.niche||"")} · há ${w.minutes<60?w.minutes+" min":Math.round(w.minutes/60)+" h"}${w.summary?" · "+esc(w.summary):""}</small></div>`).join(""):'<div class="note" style="padding:12px">Nenhum lead aguardando atendimento.</div>';
+ $("aw").querySelectorAll(".item").forEach(e=>e.onclick=()=>{cur=e.dataset.p;lastChat="";tab(1);tick()});
+ $("ar").innerHTML=a.recent.length?a.recent.map(r=>`<tr><td>${new Date(r.ts*1e3).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</td><td>${esc(r.kind)}</td><td>${esc(r.name||r.phone||"")}</td><td>${esc(r.status)}</td></tr>`).join(""):'<tr><td colspan="4" class="note">Nenhum aviso ainda.</td></tr>'}
+document.querySelectorAll("#v5 input").forEach(i=>i.oninput=()=>aEdit=true);
+let dgEdit=false;
+async function loadDigest(){const d=await api("/api/digest"),c=d.config;if(!dgEdit){["enabled","weekdays_only","whatsapp","email","webhook"].forEach(k=>$("dg_"+k).checked=!!c[k]);$("dg_hour").value=c.hour}$("dgp").textContent=d.preview}
+document.querySelectorAll("#v5 [id^=dg_]").forEach(i=>i.addEventListener("input",()=>dgEdit=true));
+$("dgsave").onclick=async()=>{const b={hour:$("dg_hour").value};["enabled","weekdays_only","whatsapp","email","webhook"].forEach(k=>b[k]=$("dg_"+k).checked);await api("/api/digest",b,"PUT");dgEdit=false;flash("dgs","Salvo");loadDigest()};
+$("dgtest").onclick=async()=>{const r=await api("/api/digest/test",{});flash("dgs","Envio: "+r.status,5000)};
+$("asave").onclick=async()=>{const b={};AB.forEach(k=>b[k]=$("a_"+k).checked);AK.forEach(k=>b[k]=$("a_"+k).value);b.whatsapp_to=$("a_whatsapp_to").value;await api("/api/alerts",b,"PUT");aEdit=false;flash("as","Salvo");loadAvisos()};
+$("atest").onclick=async()=>{const r=await api("/api/alerts/test",{});flash("as","Teste: "+r.status,5000);loadAvisos()};
+
+// retomada
+let rcad=null;
+function drawSteps(){$("rsteps").innerHTML=rcad.steps.map((s,i)=>`<div class="stp" data-i="${i}"><input type="text" inputmode="numeric" class="rd" value="${s.delay_h}" title="horas sem resposta"><select class="rm"><option value="claude" ${s.mode=="claude"?"selected":""}>Claude escreve</option><option value="fixo" ${s.mode=="fixo"?"selected":""}>Texto fixo</option></select><textarea class="rt" rows="2" placeholder="${s.mode=="fixo"?"Texto (use {nome})":"Opcional: o Claude escreve com base na conversa"}" ${s.mode=="fixo"?"":"disabled"}>${esc(s.text)}</textarea><button class="g rx" title="Remover">×</button><input type="text" class="tt rp_" placeholder="Template da Meta (só API oficial, para quem está fora de 24h)" value="${esc(s.template)}"></div>`).join("")||'<div class="note">Sem etapas.</div>';
+ $("rsteps").querySelectorAll(".stp").forEach(r=>{const i=+r.dataset.i;r.querySelector(".rd").onchange=e=>rcad.steps[i].delay_h=e.target.value;r.querySelector(".rm").onchange=e=>{rcad.steps[i].mode=e.target.value;drawSteps()};r.querySelector(".rt").oninput=e=>rcad.steps[i].text=e.target.value;r.querySelector(".rp_").oninput=e=>rcad.steps[i].template=e.target.value;r.querySelector(".rx").onclick=()=>{rcad.steps.splice(i,1);drawSteps()}})}
+async function loadRetomada(){const c=await api("/api/cadence");if(!rcad||!window._rEdit){rcad=c;$("r_enabled").checked=c.enabled;drawSteps()}
+ $("rprov").textContent=c.provider=="official"?"API oficial: fora da janela de 24h só sai com template aprovado; etapas sem template são puladas.":"Modo QR: texto livre, sem template. Mantenha as retomadas poucas e espaçadas.";
+ const p=await api("/api/followups/preview");$("rp").innerHTML=p.length?p.map(x=>`<tr><td>${esc(x.name||x.phone)}</td><td>${esc(x.niche)}</td><td>${x.step}</td><td>${x.due_min<=0?"na próxima rodada":"em "+(x.due_min<90?x.due_min+" min":Math.round(x.due_min/60)+" h")}</td></tr>`).join(""):'<tr><td colspan="4" class="note">Ninguém esperando retomada.</td></tr>'}
+["input","change"].forEach(ev=>$("v6").addEventListener(ev,()=>window._rEdit=true));
+$("radd").onclick=()=>{window._rEdit=true;if(rcad.steps.length>=5)return;rcad.steps.push({delay_h:48,mode:"claude",text:"",template:""});drawSteps()};
+$("rsave").onclick=async()=>{const r=await api("/api/cadence",{enabled:$("r_enabled").checked,steps:rcad.steps},"PUT");window._rEdit=false;rcad={...rcad,...r};drawSteps();flash("rs","Salvo");loadRetomada()};
+setInterval(()=>{if(!$("v4").classList.contains("hide"))loadFunil();if(!$("v5").classList.contains("hide"))loadAvisos();if(!$("v6").classList.contains("hide"))loadRetomada()},10000);
+
+const money=c=>"R$ "+(c/100).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+let pEdit=null,dEdit=null,evTimer=null;
+
+async function loadMat(){if(!ni)return;try{const k=await api("/api/materials?niche_id="+ni);const T_={image:"imagem",document:"documento",video:"vídeo",audio:"áudio"};
+ $("matn").textContent=k.materials.length?`(${k.materials.filter(m=>m.active).length} ativo(s))`:"(vazio)";
+ $("matl").innerHTML=k.materials.map(m=>`<tr><td>${esc(m.name)}<br><small class="note">${esc(m.descr||"")}</small></td><td>${T_[m.kind]||m.kind} · ${Math.max(1,Math.round(m.size/1024))} KB</td><td>${m.sent}×</td><td style="white-space:nowrap">${m.active?"":"<span class='tag h'>inativo</span> "}<a href="#" data-mt="${m.id}" data-ma="${m.active?0:1}">${m.active?"desativar":"ativar"}</a> · <a href="#" data-mv="${m.id}">ver</a> · <a href="#" data-md="${m.id}">apagar</a></td></tr>`).join("")||'<tr><td colspan="4" class="note">Nenhum material.</td></tr>'}catch(e){}}
+$("mat_go").onclick=()=>{if(!$("mat_n").value.trim())return flash("mat_m","Dê um nome primeiro",4000);$("mat_f").click()};
+$("mat_f").onchange=async()=>{const f=$("mat_f").files[0];$("mat_f").value="";if(!f)return;
+ try{const data=await new Promise((ok,er)=>{const r=new FileReader();r.onload=()=>ok(r.result.split(",")[1]);r.onerror=er;r.readAsDataURL(f)});
+  await api("/api/materials",{niche_id:+ni,name:$("mat_n").value,descr:$("mat_d").value,filename:f.name,mime:f.type,data});$("mat_n").value=$("mat_d").value="";flash("mat_m","Cadastrado");loadMat()}catch(e){flash("mat_m",e.message,6000)}};
+$("matl").onclick=async e=>{const a=e.target.closest("a");if(!a)return;e.preventDefault();
+ try{if(a.dataset.mt){await api("/api/materials/"+a.dataset.mt,{active:a.dataset.ma==="1"},"PUT");loadMat()}
+  else if(a.dataset.md){if(confirm("Apagar este material?")){await api("/api/materials/"+a.dataset.md,null,"DELETE");loadMat()}}
+  else if(a.dataset.mv){const r=await fetch("/api/materials/"+a.dataset.mv+"/file",{headers:{"X-Token":T}});if(r.ok)window.open(URL.createObjectURL(await r.blob()))}}catch(e){flash("mat_m",e.message,5000)}};
+function salesReset(){pEdit=dEdit=null;["cp_n","cp_p","cp_u","cp_d","cp_l","kbt","kbb"].forEach(i=>$(i).value="");$("cp_m").value="0";$("cp_a").checked=true;$("cp_save").textContent="Adicionar produto";$("cp_cancel").classList.add("hide");$("kbsave").textContent="Adicionar documento";$("kbcancel").classList.add("hide");$("kbpv").textContent="";$("cp_imp").value=""}
+async function loadSales(){if(!ni)return;try{const k=await api("/api/kb?niche_id="+ni);
+ $("catn").textContent=k.products.length?`(${k.products.filter(p=>p.active).length} ativo(s))`:"(vazio)";
+ $("catl").innerHTML=k.products.map(p=>`<tr><td>${esc(p.name)}<br><small class="note">${esc(p.description||"")}</small></td><td>${money(p.price_cents)}${p.unit?" / "+esc(p.unit):""}</td><td>${p.max_discount_pct||0}%</td><td>${p.pay_url?"sim":"—"}</td><td style="white-space:nowrap">${p.active?"":"<span class='tag h'>inativo</span> "}<a href="#" data-pe="${p.id}">editar</a> · <a href="#" data-pd="${p.id}">apagar</a></td></tr>`).join("")||'<tr><td colspan="5" class="note">Nenhum produto. Sem catálogo o agente não cita preços.</td></tr>';
+ $("catl")._p=k.products;
+ $("kbn").textContent=k.docs.length?`(${k.docs.length} doc., ${k.chars.toLocaleString("pt-BR")} caracteres, modo ${k.mode})`:"(vazio)";
+ $("kbl").innerHTML=k.docs.map(d=>`<tr><td>${esc(d.title)}</td><td>${d.chars.toLocaleString("pt-BR")}</td><td style="white-space:nowrap"><a href="#" data-de="${d.id}">editar</a> · <a href="#" data-dd="${d.id}">apagar</a></td></tr>`).join("")||'<tr><td colspan="3" class="note">Nenhum documento.</td></tr>'}catch(e){}}
+$("catl").onclick=async e=>{const a=e.target.closest("a");if(!a)return;e.preventDefault();
+ if(a.dataset.pd){if(confirm("Apagar este produto?")){await api("/api/products/"+a.dataset.pd,null,"DELETE");loadSales()}return}
+ const p=$("catl")._p.find(x=>x.id==a.dataset.pe);if(!p)return;pEdit=p.id;$("cp_n").value=p.name;$("cp_p").value=(p.price_cents/100).toFixed(2).replace(".",",");$("cp_u").value=p.unit||"";$("cp_m").value=p.max_discount_pct||0;$("cp_d").value=p.description||"";$("cp_l").value=p.pay_url||"";$("cp_a").checked=!!p.active;$("cp_save").textContent="Salvar produto";$("cp_cancel").classList.remove("hide")};
+$("cp_cancel").onclick=()=>salesReset();
+$("cp_save").onclick=async()=>{const b={niche_id:+ni,name:$("cp_n").value,price:$("cp_p").value,unit:$("cp_u").value,description:$("cp_d").value,pay_url:$("cp_l").value,max_discount_pct:parseFloat(String($("cp_m").value).replace(",","."))||0,active:$("cp_a").checked};
+ try{if(pEdit)await api("/api/products/"+pEdit,b,"PUT");else await api("/api/products",b);salesReset();flash("cp_msg","Salvo");loadSales()}catch(e){flash("cp_msg",e.message,5000)}};
+$("cp_impgo").onclick=async()=>{try{const r=await api("/api/products/import",{niche_id:+ni,text:$("cp_imp").value});$("cp_impm").textContent=r.added+" importado(s)"+(r.errors.length?" · "+r.errors.join(" | "):"");if(r.added)$("cp_imp").value="";loadSales()}catch(e){$("cp_impm").textContent=e.message}};
+$("kbl").onclick=async e=>{const a=e.target.closest("a");if(!a)return;e.preventDefault();
+ if(a.dataset.dd){if(confirm("Apagar este documento?")){await api("/api/kb/"+a.dataset.dd,null,"DELETE");loadSales()}return}
+ const d=await api("/api/kb/"+a.dataset.de);dEdit=d.id;$("kbt").value=d.title;$("kbb").value=d.body;$("kbsave").textContent="Salvar documento";$("kbcancel").classList.remove("hide")};
+$("kbcancel").onclick=()=>salesReset();
+$("kbsave").onclick=async()=>{const b={niche_id:+ni,title:$("kbt").value,body:$("kbb").value};try{if(dEdit)await api("/api/kb/"+dEdit,b,"PUT");else await api("/api/kb",b);salesReset();flash("kbm","Salvo");loadSales()}catch(e){flash("kbm",e.message,5000)}};
+$("kbfile").onclick=()=>$("kbf").click();
+$("kbf").onchange=async()=>{const f=$("kbf").files[0];if(!f)return;const buf=new Uint8Array(await f.arrayBuffer());let bin="";buf.forEach(b=>bin+=String.fromCharCode(b));
+ try{const r=await api("/api/kb/import",{niche_id:+ni,filename:f.name,data:btoa(bin)});flash("kbm",r.ids.length+" documento(s) criado(s)",4000);loadSales()}catch(e){flash("kbm",e.message,6000)}$("kbf").value=""};
+$("kbprev").onclick=async()=>{try{const r=await api("/api/kb-preview?niche_id="+ni+"&q="+encodeURIComponent($("kbq").value));$("kbpv").textContent=(r.fixo?"--- sempre enviado ---\n"+r.fixo:"(nada cadastrado)")+(r.da_conversa?"\n\n--- escolhido para esta pergunta ---\n"+r.da_conversa:"")}catch(e){$("kbpv").textContent=e.message}};
+async function evLoad(){if(!ni)return;try{if(!$("evp").children.length){const p=await api("/api/eval/personas");$("evp").innerHTML=p.personas.map(x=>`<label title="${esc(x.instrucao)}" style="display:flex;gap:6px;align-items:flex-start"><input type="checkbox" data-ev="${x.id}" ${x.padrao?"checked":""}> ${esc(x.nome)}</label>`).join("")}
+ const l=await api("/api/eval?niche_id="+ni);
+ $("evl").innerHTML=l.runs.map(r=>`<tr><td>${new Date(r.ts*1e3).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}${r.stale&&r.status=="done"?' <span class="tag h" title="O prompt, a base ou o catálogo mudaram depois desta avaliação">desatualizada</span>':""}</td>
+ <td>${r.status=="running"?"rodando… "+esc(r.progress||""):r.status=="erro"?'<span class="tag h">erro</span> '+esc(r.error):(r.score==null?"—":"<b>"+r.score+"</b>"+(r.delta!=null?` <small class="note">(${r.delta>0?"+":""}${r.delta}${r.same_config?", mesma configuração":""})</small>`:""))}</td>
+ <td>${r.hard_fails}</td><td>${r.personas.length}</td><td style="white-space:nowrap"><a href="#" data-ev1="${r.id}">ver</a> · <a href="#" data-evd="${r.id}">apagar</a></td></tr>`).join("")||'<tr><td colspan="5" class="note">Nenhuma avaliação ainda.</td></tr>';
+ clearTimeout(evTimer);if(l.running)evTimer=setTimeout(evLoad,3000)}catch(e){}}
+$("evgo").onclick=async()=>{const personas=[...document.querySelectorAll("[data-ev]:checked")].map(x=>x.dataset.ev);const b={niche_id:+ni,personas,turns:+$("evt").value,variant:$("evv").value};
+ try{const est=await api("/api/eval/estimate",b);if(est.unfilled&&est.unfilled.length){$("evm").textContent="Preencha antes: "+est.unfilled.join(", ");return}
+  if(!confirm(`Isto vai chamar o Claude cerca de ${est.calls} vezes (custo estimado ${brl(est.brl)}). Rodar agora?`))return;
+  await api("/api/eval/run",{...b,confirm_cost:true});$("evm").textContent="";evLoad()}catch(e){$("evm").textContent=e.message}};
+$("evl").onclick=async e=>{const a=e.target.closest("a");if(!a)return;e.preventDefault();
+ if(a.dataset.evd){if(confirm("Apagar esta avaliação?")){try{await api("/api/eval/"+a.dataset.evd,null,"DELETE")}catch(x){alert(x.message)}evLoad();$("evd").innerHTML=""}return}
+ const r=await api("/api/eval/"+a.dataset.ev1);$("evd").innerHTML=(r.summary?`<div class="note">${esc(r.summary)}</div>`:"")+r.results.map(x=>`<details style="margin:6px 0;border:1px solid var(--bd);border-radius:8px;padding:6px 8px"><summary style="cursor:pointer"><b>${esc(x.nome)}</b> — nota ${x.score}${x.hard_fails?` <span class="tag h">${x.hard_fails} falha(s) grave(s)</span>`:' <span class="tag q">sem falhas graves</span>'}</summary>
+ ${x.erro?`<div class="note">${esc(x.judge_error)}</div>`:""}<ul style="margin:6px 0;padding-left:18px">${x.checks.map(c=>`<li>${c.ok?"✅":c.hard?"❌":"⚠️"} <b>${esc(c.id)}</b>: ${esc(c.detail)}</li>`).join("")}</ul>
+ ${x.judge?`<div class="note">Notas: ${Object.entries(x.judge.scores).map(([k,v])=>k+" "+v).join(" · ")}. ${esc(x.judge.resumo)}</div>${x.judge.violacoes.length?`<ul style="margin:4px 0;padding-left:18px">${x.judge.violacoes.map(v=>"<li>"+esc(v)+"</li>").join("")}</ul>`:""}`:`<div class="note">${esc(x.judge_error||"")}</div>`}
+ <div class="note" style="margin-top:4px">Conversa simulada:</div><div style="max-height:260px;overflow:auto">${x.transcript.map(m=>`<div class="msg ${m.role=="lead"?"l":"s"}" style="max-width:100%;margin:3px 0">${esc(m.text)}</div>`).join("")}</div>
+ ${x.orders.length?`<div class="note">Pedidos gerados: ${x.orders.map(o=>esc(o.produto)+" x"+o.qtd+" "+money(o.total)).join("; ")}</div>`:""}</details>`).join("")};
+async function loadPay(){try{const g=await api("/api/pay");$("py_p").value=g.provider;$("py_sb").checked=g.asaas_sandbox;$("py_su").value=g.success_url||"";$("py_ex").value=g.expire_hours;$("py_ct").value=g.confirm_text||"";
+ $("py_ak").value="";$("py_ak").placeholder=g.has_asaas?(g.from_env.asaas?"definida no servidor (.env)":"•••• chave salva (deixe vazio para manter)"):"cole a chave $aact_...";
+ $("py_sk").value="";$("py_sk").placeholder=g.has_stripe?"•••• chave salva (deixe vazio para manter)":"sk_live_... ou sk_test_...";$("py_wh").value="";$("py_wh").placeholder=g.has_whsec?"•••• segredo salvo":"whsec_...";
+ $("py_awh").textContent=location.origin+"/pay/webhook/asaas\nToken: "+g.webhook_token;$("py_swh").textContent=location.origin+"/pay/webhook/stripe";payShow()}catch(e){}}
+function payShow(){const v=$("py_p").value;$("py_asaas").classList.toggle("hide",v!="asaas");$("py_stripe").classList.toggle("hide",v!="stripe")}
+$("py_p").onchange=payShow;
+const payBody=()=>({provider:$("py_p").value,asaas_key:$("py_ak").value,asaas_sandbox:$("py_sb").checked,stripe_key:$("py_sk").value,stripe_whsec:$("py_wh").value,success_url:$("py_su").value,expire_hours:parseInt($("py_ex").value)||24,confirm_text:$("py_ct").value});
+$("py_save").onclick=async()=>{try{const r=await api("/api/pay",payBody(),"PUT");flash("pays",r.aviso||"Salvo",5000);loadPay()}catch(e){flash("pays",e.message,6000)}};
+$("py_test").onclick=async()=>{try{await api("/api/pay",payBody(),"PUT");const r=await api("/api/pay/test",{});flash("pays",(r.ok?"✓ ":"✗ ")+r.detail,7000)}catch(e){flash("pays",e.message,6000)}};
+$("py_tok").onclick=async()=>{if(!confirm("O token antigo deixa de valer: atualize-o no Asaas. Continuar?"))return;try{await api("/api/pay",{...payBody(),new_token:true},"PUT");loadPay()}catch(e){flash("pays",e.message,6000)}};
+async function loadOrders(){try{const o=await api("/api/orders?days="+$("fd").value);
+ $("okpi").innerHTML=[["Pedidos",o.total],["Pagos",o.paid],["Receita",money(o.revenue_cents)],["Link → pago",o.conv_pct==null?"—":o.conv_pct+"%"]].map(([a,b])=>`<div class="kpi"><small>${a}</small><b>${b}</b></div>`).join("");
+ $("ordl").innerHTML=o.orders.map(r=>`<tr><td>${new Date(r.ts*1e3).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</td><td>${esc(r.lead_name||r.phone)}</td><td>${esc(r.product_name)} x${r.qty}${r.discount_pct?` <small class="note">(-${r.discount_pct}%)</small>`:""}</td><td>${money(r.total_cents)}</td>
+ <td>${r.status=="pago"?'<span class="tag q">pago</span>':r.status=="cancelado"?'<span class="tag">cancelado</span>':'<span class="tag h">aguardando</span>'}</td><td style="white-space:nowrap">${r.status=="link"?`<a href="#" data-op="${r.id}">marcar pago</a> · <a href="#" data-oc="${r.id}">cancelar</a>`:""}</td></tr>`).join("")||'<tr><td colspan="6" class="note">Nenhum pedido no período.</td></tr>';
+ $("ordn").textContent=o.orders.some(r=>r.status=="link"&&r.provider=="fixo")?"Link fixo não avisa o sistema: confirme o pagamento no seu provedor e use “marcar pago”.":""}catch(e){}}
+$("ordl").onclick=async e=>{const a=e.target.closest("a");if(!a)return;e.preventDefault();try{if(a.dataset.op){if(confirm("Confirmar que este pagamento foi recebido? O lead vira ganho e o cliente recebe a confirmação."))await api(`/api/orders/${a.dataset.op}/paid`,{})}else await api(`/api/orders/${a.dataset.oc}/cancel`,{})}catch(x){alert(x.message)}loadOrders()};
+$("fd").addEventListener("change",loadOrders);
+function flash(id,t,ms){const e=$(id);e.textContent=t;clearTimeout(e._t);e._t=setTimeout(()=>{e.textContent=""},ms||2500)}
+// downloads com o token do painel
+async function dl(path,filename){const r=await fetch(path,{headers:{"X-Token":T}});if(!r.ok){const e=await r.json().catch(()=>({}));alert(e.detail||"Não foi possível baixar");return}
+ const a=document.createElement("a");a.href=URL.createObjectURL(await r.blob());a.download=filename;document.body.appendChild(a);a.click();a.remove()}
+function gcal(L){const [d,t]=L.meeting_start.split("T"),[y,m,dd]=d.split("-").map(Number),[h,mi]=t.split(":").map(Number);const z=n=>String(n).padStart(2,"0");
+ const f=x=>`${x.getFullYear()}${z(x.getMonth()+1)}${z(x.getDate())}T${z(x.getHours())}${z(x.getMinutes())}00`;const a=new Date(y,m-1,dd,h,mi),b=new Date(a.getTime()+30*60000);
+ return "https://calendar.google.com/calendar/render?action=TEMPLATE&text="+encodeURIComponent("Atendimento: "+(L.name||L.phone))+"&dates="+f(a)+"/"+f(b)+"&ctz=America%2FSao_Paulo&details="+encodeURIComponent("WhatsApp: +"+L.phone)}
+
+// custos
+const brl=n=>n==null?"—":"R$ "+Number(n).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:n<1&&n>0?4:2});
+const CK=["price_in","price_out","usd_brl","budget_month_brl"];let cEdit=false;
+async function loadCustos(){const c=await api("/api/costs?days="+$("cd").value),m=c.month;
+ $("ck").innerHTML=[["Gasto no período",brl(c.total_brl)],["Neste mês",brl(m.brl)],["Projeção do mês",brl(m.projected)],["Por lead",brl(c.per_lead)],["Por qualificado",brl(c.per_qualified)],["Por encaminhado",brl(c.per_forwarded)],["Por venda (ganho)",brl(c.per_won)],["Chamadas",c.calls]].map(([a,b])=>`<div class="kpi"><small>${a}</small><b>${b}</b></div>`).join("");
+ $("cbud").innerHTML=m.budget?`<div class="note">Orçamento do mês: ${brl(m.budget)} · usado ${m.pct}%${m.blocked?" · <b style='color:var(--er)'>IA pausada por orçamento</b>":""}</div><div style="background:var(--bg);border:1px solid var(--bd);border-radius:6px;height:12px;overflow:hidden"><i style="display:block;height:100%;width:${Math.min(100,m.pct)}%;background:${m.pct>=100?"var(--er)":m.pct>=80?"var(--wr)":"var(--ac)"}"></i></div>`:'<div class="note">Sem orçamento mensal definido.</div>';
+ const mx=Math.max(1e-9,...c.daily.map(d=>d.brl));$("cdaily").innerHTML=c.daily.map(d=>`<i title="${d.day}: ${brl(d.brl)}" style="height:${Math.max(3,d.brl/mx*100)}%"></i>`).join("");
+ const t=c.tokens;$("cnote").textContent=`Tokens no período: ${t.in.toLocaleString("pt-BR")} de entrada, ${t.out.toLocaleString("pt-BR")} de saída, ${t.cache_read.toLocaleString("pt-BR")} lidos do cache. Testes (leads de teste): ${brl(c.test_brl)}, fora das médias por lead. Valores estimados com os preços informados ao lado.`;
+ const K={agente:"Conversa com o lead",abertura:"1º contato personalizado",retomada:"Retomada automática",sugestao:"Sugerir resposta",leitura:"Leitura de PDF/imagem",texto:"Outros"};
+ $("ckind").innerHTML=c.by_kind.length?c.by_kind.map(k=>`<tr><td>${esc(K[k.kind]||k.kind)}</td><td>${k.calls}</td><td>${brl(k.brl)}</td></tr>`).join(""):'<tr><td colspan="3" class="note">Sem chamadas no período.</td></tr>';
+ $("cniche").innerHTML=c.by_niche.length?c.by_niche.map(k=>`<tr><td>${esc(k.niche)}</td><td>${k.calls}</td><td>${brl(k.brl)}</td></tr>`).join(""):'<tr><td colspan="3" class="note">Sem dados.</td></tr>';
+ if(!cEdit){CK.forEach(k=>$("c_"+k).value=c.config[k]);$("c_budget_action").value=c.config.budget_action}}
+$("cd").onchange=loadCustos;document.querySelectorAll("#v7 .form input,#v7 .form select").forEach(i=>i.oninput=i.onchange=()=>cEdit=true);
+$("csave").onclick=async()=>{const b={};CK.forEach(k=>b[k]=String($("c_"+k).value).replace(",","."));b.budget_action=$("c_budget_action").value;await api("/api/costs/config",b,"PUT");cEdit=false;flash("cs","Salvo");loadCustos()};
+
+// integrações e backup
+const EVN={qualificado:"Qualificado",encaminhado:"Encaminhado ao corretor",reuniao_agendada:"Reunião agendada",humano:"Pediu atendente",descartado:"Descartado/SAIR",sem_resposta:"Sem resposta (fim da retomada)",cotacao_enviada:"Cotação enviada",ganho:"Ganho",perdido:"Perdido"};
+let iEdit=false;
+async function loadInteg(){gcLoad();const g=await api("/api/integrations"),b=await api("/api/backups");
+ const sig=JSON.stringify([g.type,g.url,g.events,g.all_events,g.pd_domain,g.hs_pipeline,g.hs_stage_new,g.hs_stage_won,g.hs_stage_lost]);
+ if(!$("ievs").children.length||(!iEdit&&sig!=window._isig)){window._isig=sig;if(!iEdit){$("i_type").value=g.type;$("i_url").value=g.url;$("i_secret").value="";$("i_pd_domain").value=g.pd_domain;$("i_pd_token").value="";$("i_hs_token").value="";["pipeline","stage_new","stage_won","stage_lost"].forEach(k=>$("i_hs_"+k).value=g["hs_"+k]);showIType()}$("ievs").innerHTML=g.all_events.map(e=>`<label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" class="iev" value="${e}" ${g.events.includes(e)?"checked":""}> ${EVN[e]||e}</label>`).join("");
+  document.querySelectorAll("#v8 .iev").forEach(i=>i.onchange=()=>iEdit=true)}
+ $("i_sec_note").textContent=g.has_secret?"Já existe um segredo salvo (deixe em branco para manter).":"Nenhum segredo definido.";
+ $("i_pd_note").textContent=g.has_pd_token?"Já existe um token salvo (deixe em branco para manter).":"Nenhum token salvo.";$("i_hs_note").textContent=g.has_hs_token?"Já existe um token salvo (deixe em branco para manter).":"Nenhum token salvo.";
+ $("ilog").innerHTML=g.recent.length?g.recent.map(r=>`<tr><td>${new Date(r.ts*1e3).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</td><td>${esc(r.event)}</td><td>${r.status=="ok"?"✓ ok":"✗ "+esc(r.detail)}</td></tr>`).join(""):'<tr><td colspan="3" class="note">Nenhum envio ainda.</td></tr>';
+ $("binfo").textContent=`${b.auto?"Backup automático diário ligado":"Backup automático desligado"} · guarda os ${b.keep} mais recentes · último: ${b.last?new Date(b.last*1e3).toLocaleString("pt-BR"):"nenhum ainda"}`;
+ $("blist").innerHTML=b.items.length?b.items.map(i=>`<tr><td>${esc(i.name)}</td><td>${i.size>1e6?(i.size/1e6).toFixed(1)+" MB":Math.max(1,Math.round(i.size/1e3))+" KB"}</td><td><button class="g bdl" data-n="${esc(i.name)}" style="padding:3px 9px">Baixar</button></td></tr>`).join(""):'<tr><td colspan="3" class="note">Nenhum backup ainda.</td></tr>';
+ document.querySelectorAll("#blist .bdl").forEach(x=>x.onclick=()=>dl(`/api/backups/${x.dataset.n}/download`,x.dataset.n))}
+function showIType(){["webhook","pipedrive","hubspot"].forEach(t=>$("g_"+t).classList.toggle("hide",$("i_type").value!=t))}
+$("i_type").onchange=()=>{iEdit=true;showIType()};
+document.querySelectorAll("#v8 input[type=text]").forEach(i=>i.oninput=()=>iEdit=true);
+$("isave").onclick=async()=>{const ev=[...document.querySelectorAll("#v8 .iev:checked")].map(x=>x.value);await api("/api/integrations",{type:$("i_type").value,url:$("i_url").value,secret:$("i_secret").value,pd_domain:$("i_pd_domain").value,pd_token:$("i_pd_token").value,hs_token:$("i_hs_token").value,hs_pipeline:$("i_hs_pipeline").value,hs_stage_new:$("i_hs_stage_new").value,hs_stage_won:$("i_hs_stage_won").value,hs_stage_lost:$("i_hs_stage_lost").value,events:ev},"PUT");iEdit=false;flash("is","Salvo");loadInteg()};
+$("itest").onclick=async()=>{const r=await api("/api/integrations/test",{});flash("is",r.ok?"Conexão ok ("+r.detail+")":"Falhou: "+r.detail,8000);loadInteg()};
+$("iexp").onclick=()=>dl("/api/export/leads.csv?days="+$("ex_d").value,"leads.csv");
+$("bnow").onclick=async()=>{$("bnow").disabled=true;try{const r=await api("/api/backups",{});flash("bs","Criado: "+r.name,5000);loadInteg()}finally{$("bnow").disabled=false}};
+setInterval(()=>{if(!$("v7").classList.contains("hide"))loadCustos();if(!$("v8").classList.contains("hide")&&!iEdit)loadInteg()},15000);
+
+// A/B
+$("eabr").onclick=async()=>{const r=await api(`/api/ab?niche_id=${ni}&days=30`);const f=(k,v)=>v[k]==null?"—":v[k];
+ const row=(l,v)=>`<tr><td><b>${l}</b></td><td>${v.leads}</td><td>${v.responderam}</td><td>${v.qualificados}</td><td>${v.encaminhados}</td><td>${v.ganhos}</td><td>${f("msgs_lead",v)}</td><td>${v.custo_lead==null?"—":brl(v.custo_lead)}</td></tr>`;
+ $("eabo").innerHTML=`<table><thead><tr><th>Versão</th><th>Leads</th><th>Resp.</th><th>Qualif.</th><th>Encam.</th><th>Ganhos</th><th>Msgs do lead</th><th>Custo/lead</th></tr></thead><tbody>${row("A (atual)",r.A)}${row("B",r.B)}</tbody></table><div class="note" style="margin-top:6px">${r.active?`Teste ligado: ${r.ab_pct}% dos leads novos no B. `:"Teste desligado. "}${esc(r.verdict)}</div>`};
+api("/api/status").then(s=>{$("pm").textContent="Modelo: "+s.model});
+loadNiches().then(()=>{loadQuick();tick();setInterval(tick,3000)});
+</script></body></html>

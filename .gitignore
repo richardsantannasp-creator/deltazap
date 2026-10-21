@@ -1,0 +1,11 @@
+.env
+sdr.db*
+uploads/
+backups/
+__pycache__/
+node_modules/
+.venv/
+gateway/auth*/
+gateway/jids.json
+gateway/lines.json
+*.log

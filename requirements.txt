@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+anthropic
+httpx
+python-dotenv
+Pillow
+# Opcional, só para transcrever áudio localmente (STT_PROVIDER=local): pip install faster-whisper
+openpyxl
+tzdata
+# Google Agenda (assinatura RS256 da conta de serviço)
+cryptography

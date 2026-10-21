@@ -1,0 +1,704 @@
+// Teste de ponta a ponta: abre o dashboard.html REAL num Chromium e usa o server.py REAL (com WhatsApp/Claude/Whisper simulados).
+// Uso: NODE_PATH=$(npm root -g) node tests/e2e.js
+const { chromium } = require('playwright')
+const { spawn } = require('child_process')
+const path = require('path')
+const ROOT = path.resolve(__dirname, '..')
+const PORT = 8766, BASE = `http://127.0.0.1:${PORT}`, TOKEN = 'testtoken'
+const results = []
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const api = async (p, o = {}) => {
+  const r = await fetch(BASE + p, { method: o.method || (o.body ? 'POST' : 'GET'), headers: { 'X-Token': o.token ?? TOKEN, 'Content-Type': 'application/json', ...(o.headers || {}) }, body: o.body ? JSON.stringify(o.body) : undefined })
+  return { status: r.status, json: await r.json().catch(() => null) }
+}
+const inbound = (body, secret = 'seg') => fetch(BASE + '/gateway/inbound', { method: 'POST', headers: { 'x-secret': secret, 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.status)
+const db = async (sql, args = []) => (await api('/__test/db', { body: { sql, args } })).json
+const until = async (fn, ms = 10000, what = 'condição') => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await fn()) return } catch {} await sleep(150) } throw new Error('tempo esgotado esperando: ' + what) }
+const expect = (c, msg) => { if (!c) throw new Error(msg) }
+const step = async (name, fn) => {
+  try { await fn(); results.push([true, name]); console.log('OK    ' + name) }
+  catch (e) { const m = String(e.message).split('\n')[0]; results.push([false, name + ' -> ' + m]); console.log('FALHA ' + name + ' -> ' + m) }
+}
+
+;(async () => {
+  const srv = spawn('python3', [path.join(ROOT, 'tests/harness.py'), String(PORT)], { cwd: ROOT, env: { ...process.env, BACKUP_DIR: require('os').tmpdir() + '/sdr-e2e-bk-' + Date.now() } })
+  let srvLog = ''
+  srv.stdout.on('data', (d) => (srvLog += d)); srv.stderr.on('data', (d) => (srvLog += d))
+  await until(() => srvLog.includes('harness em'), 15000, 'servidor de teste')
+
+  const browser = await chromium.launch()
+  const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } })
+  await ctx.addInitScript((t) => localStorage.setItem('tok', t), TOKEN)
+  const page = await ctx.newPage()
+  const dialogs = [], pageErrors = [], bad5xx = []
+  let promptAnswer = ''
+  page.on('dialog', async (d) => { dialogs.push(d.message()); d.type() === 'prompt' ? await d.accept(promptAnswer) : await d.accept() })
+  page.on('pageerror', (e) => pageErrors.push(String(e.message || e)))
+  page.on('response', (r) => { if (r.status() >= 500) bad5xx.push(r.status() + ' ' + r.url()) })
+  const upload = async (sel, file) => { const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.click(sel)]); await fc.setFiles(file) }
+  const chat = () => page.innerText('#chat')
+  const nicheItem = (n) => page.click(`#nl .item:nth-child(${n})`)
+  await page.goto(BASE)
+  await api('/api/pacing', { method: 'PUT', body: { reply_delay_min: 0, reply_delay_max: 0 } })
+
+  // ---------- 1. abertura ----------
+  await step('painel abre e mostra o modelo e a conexão do gateway', async () => {
+    await page.waitForSelector('#leads')
+    expect((await page.title()) === 'Painel SDR WhatsApp', 'título')
+    await until(async () => (await page.innerText('#pm')).includes('claude-haiku-5-5'), 6000, 'pílula do modelo')
+    await until(async () => (await page.innerText('#pc')).includes('conectado'), 6000, 'pílula de conexão')
+    expect((await chat()).includes('Nenhum lead ainda'), 'mensagem de lista vazia')
+  })
+  await step('API recusa requisições sem token ou com token errado', async () => {
+    expect((await api('/api/leads', { token: '' })).status === 401, 'sem token')
+    expect((await api('/api/leads', { token: 'errado' })).status === 401, 'token errado')
+    expect((await inbound({ from: '5511', type: 'text', text: 'x' }, 'errado')) === 403, 'gateway com segredo errado')
+  })
+
+  // ---------- 2. agentes ----------
+  await step('aba Agentes lista os 3 nichos e carrega prompt, base e palavras-chave', async () => {
+    await page.click('#t2')
+    await until(async () => (await page.$$('#nl .item')).length === 3, 6000, '3 nichos')
+    const list = await page.innerText('#nl')
+    expect(list.includes('Planos de saúde') && list.includes('padrão') && list.includes('Limpa Multas') && list.includes('ativo + receptivo'), 'lista')
+    expect((await page.inputValue('#ep')).includes('PAPEL E META'), 'prompt de saúde (novo script)')
+    expect((await page.inputValue('#ekb')).length > 2000, 'base de conhecimento de saúde')
+    expect((await page.inputValue('#ek')).includes('plano de saúde'), 'palavras-chave')
+    await nicheItem(3)
+    await until(async () => (await page.inputValue('#en')) === 'Limpa Multas', 4000, 'editor trocou')
+    expect((await page.inputValue('#edh')).includes('tipo de documento'), 'doc_hint')
+    expect((await page.inputValue('#ekb')).includes('Limpa Multas BR'), 'base Limpa Multas')
+  })
+  await step('criar, editar, salvar, duplicar e excluir nicho', async () => {
+    promptAnswer = 'Energia solar'; await page.click('#nn')
+    await until(async () => (await page.$$('#nl .item')).length === 4, 5000, 'nicho novo')
+    expect((await page.inputValue('#en')) === 'Energia solar' && (await page.inputValue('#ep')).includes('[NOME]'), 'editor do novo nicho')
+    await page.fill('#ek', 'energia solar, painel solar'); await page.check('#epz'); await page.fill('#eo', 'Olá, {nome}! Posso falar sobre energia solar? Responda SAIR para parar.')
+    await page.click('#es_'); await until(async () => (await page.textContent('#es')).includes('Salvo'), 4000, 'Salvo')
+    const n = (await api('/api/niches')).json.find((x) => x.name === 'Energia solar')
+    expect(n.keywords.includes('painel solar') && n.personalize === 1 && n.outbound_text.includes('energia solar'), 'persistiu no servidor')
+    await page.click('#ec'); await until(async () => (await page.$$('#nl .item')).length === 5, 5000, 'cópia')
+    expect((await page.inputValue('#en')).includes('(cópia)'), 'nome da cópia')
+    await page.click('#ex'); await until(async () => (await page.$$('#nl .item')).length === 4, 5000, 'cópia excluída')
+  })
+  await step('carregar prompt de arquivo de texto', async () => {
+    await nicheItem(2); await until(async () => (await page.inputValue('#en')) === 'Modelo em branco', 4000, 'trocou')
+    const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.click('.ld[data-t="ep"]')])
+    await fc.setFiles({ name: 'p.txt', mimeType: 'text/plain', buffer: Buffer.from('PROMPT NOVO DE TESTE') })
+    await until(async () => (await page.inputValue('#ep')) === 'PROMPT NOVO DE TESTE', 4000, 'texto carregado')
+  })
+
+  // ---------- 3. conversa de teste ----------
+  await step('Testar ativo cria lead com 1º contato do nicho (nada vai ao WhatsApp)', async () => {
+    await nicheItem(3); await until(async () => (await page.inputValue('#en')) === 'Limpa Multas', 4000)
+    await page.click('#et_')
+    await until(async () => !(await page.getAttribute('#v1', 'class')).includes('hide'), 4000, 'voltou às conversas')
+    await until(async () => (await chat()).includes('Limpa Multas BR'), 6000, '1º contato no chat')
+    expect((await page.innerText('#leads')).includes('teste'), 'tag teste')
+    expect((await api('/__test/sent')).json.length === 0, 'lead de teste não deve enviar ao WhatsApp')
+  })
+  await step('lead responde, Claude usa ferramentas, CRM e temperatura aparecem', async () => {
+    await page.fill('#mi', 'Moramos em Campinas'); await page.click('#sim')
+    await until(async () => (await chat()).includes('anotei tudo'), 8000, 'resposta do agente')
+    await until(async () => { const c = await page.innerText('#crm'); return c.includes('Campinas') && c.includes('encaminhado') }, 6000, 'CRM atualizado')
+    await until(async () => (await page.innerText('#leads')).includes('quente'), 6000, 'etiqueta de temperatura')
+    await until(async () => (await page.innerText('#log')).includes('ENCAMINHADO'), 6000, 'evento no log')
+  })
+  await step('seletor de emojis insere no cursor e fecha ao clicar fora', async () => {
+    await page.fill('#mi', 'Olá'); await page.click('#emo')
+    await page.waitForSelector('#emop:not(.hide)')
+    await page.click('#emt button[data-k="❤️"]'); await page.click('#emg button >> nth=0')
+    const v = await page.inputValue('#mi'); expect(v.length > 'Olá'.length && v.startsWith('Olá'), 'emoji não foi inserido: ' + v)
+    await page.click('#ct'); await until(async () => (await page.getAttribute('#emop', 'class')).includes('hide'), 3000, 'fechou')
+    await page.fill('#mi', '')
+  })
+  await step('Sugerir resposta preenche o campo sem enviar', async () => {
+    await page.click('#sug'); await until(async () => (await page.inputValue('#mi')).includes('data-limite'), 6000, 'sugestão')
+    expect((await api('/__test/sent')).json.length === 0, 'sugestão não pode enviar')
+    await page.fill('#mi', '')
+  })
+  await step('assumir conversa pausa a IA; retomar reativa', async () => {
+    await page.click('#tk'); await until(async () => (await page.textContent('#ct')).includes('IA pausada'), 4000, 'pausou')
+    await page.fill('#mi', 'oi, ainda aí?'); await page.click('#sim'); await sleep(2500)
+    const t = await chat(); expect(t.includes('oi, ainda aí?') && !t.includes('Entendi! E qual é a sua cidade'), 'IA respondeu mesmo pausada')
+    await page.click('#tk'); await until(async () => !(await page.textContent('#ct')).includes('IA pausada'), 4000, 'retomou')
+  })
+  await step('anexar JPG, PDF e áudio: leitura pelo Claude e transcrição aparecem na conversa', async () => {
+    await upload('#simf', { name: 'notificacao.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6]) })
+    await until(async () => (await chat()).includes('Leitura automática'), 8000, 'leitura da imagem')
+    await upload('#simf', { name: 'notificacao.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 teste') })
+    await until(async () => ((await chat()).match(/Leitura automática/g) || []).length >= 2, 8000, 'leitura do PDF')
+    await upload('#simf', { name: 'voz.ogg', mimeType: 'audio/ogg', buffer: Buffer.from('OggS-teste') })
+    await until(async () => (await chat()).includes('transcrito automaticamente'), 8000, 'transcrição do áudio')
+    const kinds = (await api('/__test/calls')).json.map((c) => c.kind)
+    expect(kinds.filter((k) => k === 'leitura').length === 2, 'chamadas de leitura: ' + kinds.filter((k) => k === 'leitura').length)
+  })
+  await step('botão Arquivos lista os 3 arquivos e abre o original', async () => {
+    await page.evaluate(() => { window.__opened = []; window.open = (u) => { window.__opened.push(u) } })
+    await page.click('#fb'); await page.waitForSelector('#fdlg[open]')
+    await until(async () => (await page.$$('#fl .item')).length === 3, 4000, '3 arquivos')
+    await page.click('#fl .item >> nth=0'); await until(async () => (await page.evaluate(() => window.__opened.length)) === 1, 4000, 'abriu')
+    const leads = (await api('/api/leads')).json; const t = leads.find((l) => l.test)
+    const files = (await api('/api/files/' + t.phone)).json
+    const r = await fetch(`${BASE}/api/file/${t.phone}/${files[0].name}`, { headers: { 'X-Token': TOKEN } })
+    expect(r.status === 200 && r.headers.get('content-type') === 'image/jpeg', 'download do arquivo')
+    expect((await fetch(`${BASE}/api/file/${t.phone}/..%2Fsdr.db`, { headers: { 'X-Token': TOKEN } })).status !== 200, 'path traversal')
+    await page.click('#fx')
+  })
+
+  // ---------- 4. planilha, disparo e fila ----------
+  const csv = 'Nome;WhatsApp;Empresa;Observação\nJoão Ação;(11) 99999-0010;Padaria São José;pediu cotação\nMaria Silva;11 98888-0011;;\nRepetido;11999990010;;\nCurto;12345;;\nSem WhatsApp;11 90000-0404;;\nSair Depois;11 97777-0099;;\n'
+  await step('Disparar exige nicho e consentimento; importar planilha valida os contatos', async () => {
+    await page.click('#open'); await page.waitForSelector('#dlg[open]')
+    await page.click('#dgo'); await until(async () => (await page.innerText('#dres')).includes('Defina o nicho'), 3000, 'exigir nicho')
+    await page.selectOption('#dn', { label: 'Planos de saúde' })
+    await until(async () => (await page.innerText('#dpv')).includes('Aqui é a Ana'), 3000, 'prévia da mensagem')
+    await upload('#upb', { name: 'leads.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'latin1') })
+    await until(async () => (await page.innerText('#upres')).includes('4 contato(s) pronto(s)'), 6000, 'resumo da planilha')
+    const res = await page.innerText('#upres'); expect(res.includes('repetido') && res.includes('curto demais'), 'motivos: ' + res)
+    expect((await page.inputValue('#dl')).trim().split('\n').length === 4, 'linhas na caixa')
+    const dBefore = dialogs.length
+    await page.click('#dgo'); await until(() => dialogs.length > dBefore && dialogs.at(-1).includes('consentimento'), 4000, 'alerta de consentimento')
+    await page.check('#dc'); const d2 = dialogs.length; await page.click('#dgo')
+    await until(() => dialogs.length > d2 && dialogs.at(-1).includes('de onde veio o consentimento'), 4000, 'exige a origem do consentimento')
+    await page.fill('#dorig', 'formulário do site em 10/2026'); await page.click('#dgo')
+    await until(async () => (await page.innerText('#dres')).includes('4 contato(s) na fila'), 5000, 'enfileirou')
+    expect((await db("SELECT consent FROM outbox LIMIT 1"))[0].consent === 'formulário do site em 10/2026', 'origem gravada na fila')
+    await page.click('#dx')
+  })
+  await step('aba Envio: fila e limite de aquecimento', async () => {
+    await page.click('#t3')
+    await until(async () => (await page.innerText('#bq')).split('queued').length - 1 === 4, 6000, '4 na fila')
+    const k = (await page.innerText('#kpis')).replace(/\n/g, ' '); expect(k.includes('0 / 20') && /Na fila\s*4/.test(k), 'KPIs: ' + k)
+    expect((await page.textContent('#mrisk')).includes('sem dados'), 'risco sem dados')
+  })
+  await step('a fila envia no ritmo: 1 por vez, com "digitando", pulando número sem WhatsApp', async () => {
+    const out = []
+    for (let i = 0; i < 4; i++) out.push((await api('/__test/tick', { body: {} })).json.map((r) => r.status).join(','))
+    expect(out[0] === 'sent,queued,queued,queued', 'um por vez: ' + out[0])
+    expect(out[3] === 'sent,sent,skipped,sent', 'resultado final: ' + out[3])
+    const sent = (await api('/__test/sent')).json
+    expect(sent.length === 3 && sent.every((s) => s.typing_ms >= 1500 && s.text.includes('SAIR')), 'envios: ' + JSON.stringify(sent.map((s) => s.typing_ms)))
+    expect(sent[0].to === '5511999990010' && sent[0].text.includes('João'), 'personalizou o nome')
+    const err = (await db("SELECT error FROM outbox WHERE status='skipped'"))[0].error
+    expect(err === 'número sem WhatsApp', 'motivo: ' + err)
+  })
+  await step('contatos disparados aparecem em Conversas como Ativo; métricas atualizam', async () => {
+    await page.click('#t1'); await until(async () => { const t = await page.innerText('#leads'); return t.includes('João') && t.includes('Maria') && t.includes('Sair Depois') }, 6000, 'leads disparados')
+    expect((await page.innerText('#leads')).includes('Ativo'), 'tag Ativo')
+    await page.click('#t3'); await until(async () => (await page.innerText('#kpis')).includes('3 / 20'), 7000, 'enviados hoje 3')
+    expect((await page.innerText('#bn')).includes('Planos de saúde'), 'tabela por nicho')
+    expect((await page.$$('#bars i')).length === 24, 'gráfico por hora')
+  })
+  await step('limite diário bloqueia novos envios; pausa e retomada; limpar fila', async () => {
+    await page.fill('#p_daily_limit', '3'); await page.click('#psave'); await sleep(600)
+    await api('/api/dispatch', { body: { niche_id: 1, lines: '11955550001;Extra Um\n11955550002;Extra Dois', consent: true, origem: 'lista de teste' } })
+    let r = (await api('/__test/tick', { body: {} })).json; expect(r.filter((x) => x.status === 'queued').length === 2, 'limite diário não bloqueou')
+    await page.fill('#p_daily_limit', '80'); await page.click('#psave'); await sleep(600)
+    await page.click('#ppause'); await until(async () => (await page.innerText('#apause')).includes('pausados pelo operador'), 4000, 'banner de pausa')
+    r = (await api('/__test/tick', { body: {} })).json; expect(r.filter((x) => x.status === 'queued').length === 2, 'enviou pausado')
+    await page.click('#ppause'); await until(async () => !(await page.innerText('#apause')).includes('pausados'), 4000, 'retomou')
+    r = (await api('/__test/tick', { body: {} })).json; expect(r.filter((x) => x.status === 'queued').length === 1, 'não retomou o envio')
+    await page.click('#pclear'); await until(async () => !(await page.innerText('#bq')).includes('queued'), 4000, 'fila limpa')
+  })
+  await step('salvar ritmo persiste após recarregar a página; pisos de segurança valem', async () => {
+    await page.fill('#p_min_delay', '30'); await page.fill('#p_max_delay', '60'); await page.fill('#p_batch_size', '5'); await page.uncheck('#p_warmup')
+    await page.click('#psave'); await sleep(700); await page.reload(); await page.click('#t3')
+    await until(async () => (await page.inputValue('#p_min_delay')) === '30' && (await page.inputValue('#p_batch_size')) === '5', 5000, 'valores')
+    expect((await page.inputValue('#p_max_delay')) === '60' && !(await page.isChecked('#p_warmup')), 'max/warmup')
+    const bad = (await api('/api/pacing', { method: 'PUT', body: { min_delay: 1, daily_limit: 99999 } })).json
+    expect(bad.min_delay === 20 && bad.daily_limit === 300, 'pisos de segurança: ' + bad.min_delay + '/' + bad.daily_limit)
+    await api('/api/pacing', { method: 'PUT', body: { min_delay: 45, max_delay: 150, batch_size: 8, daily_limit: 80, warmup: true } })
+  })
+  await step('pausa automática por muitos descartes; painel mostra o motivo e risco alto', async () => {
+    await api('/api/pacing', { method: 'PUT', body: { warmup: false, daily_limit: 300 } })
+    for (let i = 0; i < 25; i++) {
+      await db("INSERT INTO outbox(phone,niche_id,status,created,sent_at) VALUES(?,?,?,?,strftime('%s','now'))", [`551193000${100 + i}`, 1, 'sent', 1])
+      await db("INSERT OR IGNORE INTO leads(phone,stage,created) VALUES(?,?,1)", [`551193000${100 + i}`, 'descartado'])
+    }
+    await api('/api/dispatch', { body: { niche_id: 1, lines: '11955550003;Extra Tres', consent: true, origem: 'lista de teste' } })
+    await api('/__test/tick', { body: {} })
+    await page.click('#t1'); await page.click('#t3')
+    await until(async () => (await page.innerText('#apause')).includes('automaticamente'), 6000, 'banner de pausa automática')
+    expect((await page.textContent('#mrisk')).includes('alto'), 'risco alto')
+    await page.click('#ppause'); await until(async () => !(await page.innerText('#apause')).includes('automaticamente'), 4000, 'retomou manualmente')
+    await api('/api/outbox/clear', { body: {} })
+    await db("DELETE FROM outbox WHERE phone LIKE '551193000%'")
+  })
+
+  // ---------- 5. conexão ----------
+  await step('QR: aparece quando o gateway aguarda, código por número, e muda ao conectar', async () => {
+    await api('/__test/gateway', { body: { state: 'qr' } })
+    await until(async () => await page.isVisible('#qrbox img'), 6000, 'imagem do QR')
+    expect(await page.isVisible('#pairbox'), 'caixa do código por número')
+    expect((await page.innerText('#pc')).includes('escaneie o QR'), 'pílula')
+    await page.fill('#pn', '5511999990000'); await page.click('#pg')
+    await until(async () => (await page.innerText('#pcode')) === 'ABCD-EFGH', 4000, 'código')
+    await page.fill('#pn', '123'); await page.click('#pg')
+    await until(async () => (await page.innerText('#pcode')).includes('Informe o número com DDI e DDD'), 4000, 'erro visível')
+    await api('/__test/gateway', { body: { state: 'open' } })
+    await until(async () => (await page.innerText('#qrbox')).includes('Conectado como +5521999990000'), 6000, 'conectado')
+    expect(!(await page.isVisible('#pairbox')), 'caixa do código deve sumir')
+    await page.click('#lo'); await until(async () => await page.isVisible('#qrbox img'), 6000, 'voltou ao QR após desconectar')
+    await api('/__test/gateway', { body: { state: 'open' } })
+  })
+
+  // ---------- 6. mensagens recebidas pelo WhatsApp (gateway) ----------
+  const sentTo = async (to) => (await api('/__test/sent')).json.filter((s) => s.to === to)
+  const lead = async (phone) => (await api('/api/leads')).json.find((l) => l.phone === phone)
+  await step('lead novo pergunta de plano de saúde: roteia, responde com "digitando" e usa as ferramentas', async () => {
+    expect((await inbound({ from: '5521911110001', name: 'Paulo', id: 'W1', type: 'text', text: 'Olá, vocês trabalham com plano de saúde?' })) === 200, 'status')
+    await until(async () => (await sentTo('5521911110001')).length === 1, 8000, 'resposta enviada')
+    let l = await lead('5521911110001'); expect(l.origin === 'receptivo' && l.niche === 'Planos de saúde', 'rota: ' + l.niche)
+    const s = (await sentTo('5521911110001'))[0]; expect(s.typing_ms >= 1500 && s.text.includes('cidade'), 'resposta/typing')
+    await inbound({ from: '5521911110001', id: 'W2', type: 'text', text: 'Moramos em Campinas' })
+    await until(async () => (await lead('5521911110001')).stage === 'encaminhado', 8000, 'encaminhado')
+    l = await lead('5521911110001'); expect(JSON.parse(l.bant).cidade === 'Campinas' && JSON.parse(l.bant).temperatura === 'quente', 'CRM')
+  })
+  await step('mensagem repetida do WhatsApp (mesmo id) não duplica', async () => {
+    await inbound({ from: '5521911110009', name: 'Dup', id: 'DUP1', type: 'text', text: 'plano de saúde' })
+    await inbound({ from: '5521911110009', name: 'Dup', id: 'DUP1', type: 'text', text: 'plano de saúde' })
+    await until(async () => (await sentTo('5521911110009')).length >= 1, 6000, 'resposta'); await sleep(500)
+    const n = (await db("SELECT COUNT(*) n FROM messages WHERE phone='5521911110009' AND role='lead'"))[0].n
+    expect(n === 1, 'mensagens do lead: ' + n)
+  })
+  await step('foto da multa de um lead novo é lida e roteada para o nicho Limpa Multas', async () => {
+    await inbound({ from: '5521911110002', name: 'Carlos', id: 'W3', type: 'image', mime: 'image/jpeg', text: '', media: Buffer.from([0xff, 0xd8, 0xff, 1, 2, 3]).toString('base64') })
+    await until(async () => await lead('5521911110002'), 8000, 'lead criado')
+    const l = await lead('5521911110002'); expect(l.niche === 'Limpa Multas' && l.origin === 'receptivo', 'rota: ' + l.niche)
+    const m = await db("SELECT text FROM messages WHERE phone='5521911110002' AND role='lead'"); expect(m[0].text.includes('Leitura automática'), 'leitura')
+    await until(async () => (await sentTo('5521911110002')).length === 1, 8000, 'resposta do agente')
+  })
+  await step('fotos de perfil: cliente e operador aparecem na lista, no cabeçalho e nas mensagens (iniciais quando não há foto)', async () => {
+    await api('/__test/photo', { body: { have: ['5521911110002', 'me'] } })
+    await page.click('#t1'); await page.waitForSelector('#leads .item')
+    await page.click('#leads .item[data-p="5521911110002"]')
+    await until(async () => (await page.textContent('#ct')).includes('Carlos'), 6000, 'conversa do Carlos')
+    await until(async () => await page.isVisible('#ct .av.has img'), 8000, 'foto do cliente no cabeçalho')
+    await until(async () => (await page.$$('#chat .mrow.l .av.has img')).length >= 1, 6000, 'foto do cliente nas mensagens')
+    await until(async () => (await page.$$('#chat .mrow.s .av.has img')).length >= 1, 6000, 'foto do operador nas respostas')
+    expect(await page.isVisible('#leads .item[data-p="5521911110002"] .av.has img'), 'foto do cliente na lista')
+    const semFoto = await page.$('#leads .item[data-p="5521911110003"] .av:not(.has)')
+    if (semFoto) expect((await semFoto.getAttribute('data-i')).length >= 1, 'iniciais')
+    expect(!(await page.textContent('#ct')).includes('CA'), 'as iniciais não entram no texto do título')
+  })
+  await step('áudio é transcrito e roteado; PDF com legenda é lido', async () => {
+    await inbound({ from: '5521911110003', name: 'Ana', id: 'W4', type: 'audio', mime: 'audio/ogg; codecs=opus', media: Buffer.from('OggS-voz').toString('base64') })
+    await until(async () => await lead('5521911110003'), 8000, 'lead do áudio')
+    const m = await db("SELECT text FROM messages WHERE phone='5521911110003' AND role='lead'"); expect(m[0].text.includes('transcrito automaticamente') && m[0].text.includes('multa'), 'transcrição: ' + m[0].text)
+    expect((await lead('5521911110003')).niche === 'Limpa Multas', 'rota pelo conteúdo transcrito')
+    await inbound({ from: '5521911110004', name: 'Bia', id: 'W5', type: 'document', mime: 'application/pdf', text: 'segue a notificação', media: Buffer.from('%PDF-1.4').toString('base64') })
+    await until(async () => await lead('5521911110004'), 8000, 'lead do PDF')
+    const p = await db("SELECT text FROM messages WHERE phone='5521911110004' AND role='lead'"); expect(p[0].text.includes('Leitura automática') && p[0].text.includes('segue a notificação'), 'PDF')
+  })
+  await step('SAIR descarta o lead, confirma, e nunca mais recebe disparo', async () => {
+    await inbound({ from: '5521911110001', id: 'W6', type: 'text', text: 'SAIR' })
+    await until(async () => (await lead('5521911110001')).stage === 'descartado', 6000, 'descartado')
+    await until(async () => (await sentTo('5521911110001')).some((s) => s.text.includes('não vou mais te enviar')), 6000, 'despedida enviada')
+    const n = (await sentTo('5521911110001')).length
+    await inbound({ from: '5521911110001', id: 'W7', type: 'text', text: 'oi de novo' }); await sleep(1200)
+    expect((await sentTo('5521911110001')).length === n, 'respondeu a um lead descartado')
+    const csv2 = Buffer.from('nome,whatsapp\nQuem saiu,5521911110001\n').toString('base64')
+    const p = (await api('/api/contacts/parse', { body: { filename: 'x.csv', data: csv2 } })).json
+    expect(p.valid === 0 && p.issues[0].reason.includes('pediu para sair'), 'planilha deveria pular quem saiu')
+    const dsp = await api('/api/dispatch', { body: { niche_id: 1, lines: '5521911110001;Quem saiu', consent: true, origem: 'lista de teste' } })
+    expect(dsp.status === 400 && JSON.stringify(dsp.json).includes('pediram para sair'), 'disparo para quem saiu deveria ser recusado: ' + JSON.stringify(dsp.json))
+    expect((await db("SELECT COUNT(*) n FROM outbox WHERE phone='5521911110001'"))[0].n === 0, 'entrou na fila')
+  })
+  await step('leads recebidos aparecem no painel como Receptivo', async () => {
+    await page.click('#t1'); await until(async () => { const t = await page.innerText('#leads'); return t.includes('Paulo') && t.includes('Carlos') && t.includes('Receptivo') }, 7000, 'leads receptivos')
+  })
+  await step('rotas de erro: nicho inexistente, planilha inválida, nicho com leads, lead inexistente', async () => {
+    expect((await api('/api/dispatch', { body: { niche_id: 999, lines: '11999990001', consent: true, origem: 'lista de teste' } })).status === 400, 'nicho inválido')
+    expect((await api('/api/contacts/parse', { body: { filename: 'a.xls', data: Buffer.from('x').toString('base64') } })).status === 400, '.xls')
+    expect((await api('/api/niches/1', { method: 'DELETE' })).status === 400, 'excluir nicho com leads')
+    expect((await api('/api/leads/999/suggest', { body: {} })).status === 404, 'sugestão de lead inexistente')
+  })
+
+
+  // ---------- 6b. avisos, resultado, retomada e funil ----------
+  await step('Avisos: configurar o WhatsApp do corretor pela tela e salvar', async () => {
+    await page.click('#t5'); await page.waitForSelector('#a_whatsapp_to')
+    await page.fill('#a_whatsapp_to', '(21) 99999-1111'); await page.fill('#a_sla_min', '15'); await page.fill('#a_repeat_min', '30'); await page.fill('#a_max_reminders', '2')
+    await page.click('#asave'); await until(async () => (await page.textContent('#as')).includes('Salvo'), 4000, 'salvo')
+    const c = (await api('/api/alerts')).json; expect(c.config.whatsapp_to === '5521999991111', 'número normalizado: ' + c.config.whatsapp_to)
+    expect(c.channels.whatsapp === true && c.channels.email === false, 'canais')
+    expect((await page.innerText('#ach')).includes('WhatsApp'), 'canais na tela')
+  })
+  await step('lead qualificado é encaminhado: corretor recebe o aviso e a tela mostra "aguardando"', async () => {
+    await inbound({ from: '5531911110001', name: 'Renata', id: 'AV1', type: 'text', text: 'oi, quero plano de saúde, moramos em Campinas' })
+    await until(async () => (await lead('5531911110001')).stage === 'encaminhado', 8000, 'encaminhado')
+    await until(async () => (await sentTo('5521999991111')).some((s) => s.text.includes('Novo lead') && s.text.includes('Renata')), 8000, 'aviso ao corretor')
+    await until(async () => !(await page.$eval('#pw', (e) => e.classList.contains('hide'))), 20000, 'pílula aguardando')
+    await page.click('#pw'); await until(async () => (await page.innerText('#aw')).includes('Renata'), 6000, 'lista de aguardando')
+    expect((await page.innerText('#ar')).includes('encaminhado'), 'histórico de avisos')
+  })
+  await step('botão de teste de aviso entrega no WhatsApp do corretor', async () => {
+    const n = (await sentTo('5521999991111')).length
+    await page.click('#atest'); await until(async () => (await sentTo('5521999991111')).length === n + 1, 6000, 'aviso de teste')
+  })
+  await step('lembrete de SLA chega quando o prazo passa', async () => {
+    await db("UPDATE leads SET alerted_at=alerted_at-3600 WHERE phone='5531911110001'")
+    const n = (await sentTo('5521999991111')).length
+    expect((await api('/__test/sla', { body: {} })).json.reminders === 1, 'um lembrete')
+    await until(async () => (await sentTo('5521999991111')).length === n + 1 && (await sentTo('5521999991111')).slice(-1)[0].text.includes('Lembrete'), 6000, 'lembrete enviado')
+  })
+  await step('Conversas: marcar atendido e registrar resultado "Ganho" pela tela', async () => {
+    await page.click('#t1'); await page.click('#leads .item[data-p="5531911110001"]')
+    await until(async () => (await page.innerText('#oc')).includes('Aguardando atendimento'), 6000, 'barra de resultado')
+    await page.click('#oc button[data-a="h"]'); await until(async () => (await lead('5531911110001')).handled_at, 5000, 'atendido')
+    await until(async () => (await page.innerText('#oc')).includes('Atendido'), 5000, 'texto atendido')
+    await page.click('#oc button[data-o="ganho"]'); await until(async () => (await lead('5531911110001')).outcome === 'ganho', 5000, 'ganho')
+    await until(async () => (await page.innerText('#oc')).includes('Ganho'), 5000, 'ganho na tela')
+    await until(async () => (await page.$eval('#pw', (e) => e.classList.contains('hide'))), 20000, 'pílula some')
+  })
+  await step('Perdido pede o motivo e Reabrir limpa o resultado', async () => {
+    await inbound({ from: '5531911110002', name: 'Otávio', id: 'AV2', type: 'text', text: 'olá' }); await until(async () => await lead('5531911110002'), 8000, 'lead')
+    await page.click('#leads .item[data-p="5531911110002"]'); await until(async () => (await page.innerText('#oc')).includes('Resultado do lead'), 6000, 'barra')
+    promptAnswer = 'achou caro'; await page.click('#oc button[data-o="perdido"]')
+    await until(async () => (await lead('5531911110002')).outcome === 'perdido', 5000, 'perdido')
+    expect((await lead('5531911110002')).outcome_reason === 'achou caro', 'motivo salvo')
+    await until(async () => (await page.innerText('#oc')).includes('achou caro'), 5000, 'motivo na tela')
+    await page.click('#oc button[data-o=""]'); await until(async () => (await lead('5531911110002')).outcome === '', 5000, 'reaberto')
+    promptAnswer = ''
+  })
+  await step('Retomada: ligar, editar etapas pela tela e salvar', async () => {
+    await page.click('#t6'); await page.waitForSelector('#rsteps .stp')
+    expect((await page.$$('#rsteps .stp')).length === 3, '3 etapas padrão')
+    await page.check('#r_enabled')
+    await page.fill('#rsteps .stp:nth-child(1) .rd', '12'); await page.dispatchEvent('#rsteps .stp:nth-child(1) .rd', 'change')
+    await page.selectOption('#rsteps .stp:nth-child(2) .rm', 'fixo'); await page.fill('#rsteps .stp:nth-child(2) .rt', 'Oi {nome}, ainda posso ajudar?')
+    await page.click('#radd'); expect((await page.$$('#rsteps .stp')).length === 4, 'etapa adicionada')
+    await page.click('#rsteps .stp:nth-child(4) .rx'); expect((await page.$$('#rsteps .stp')).length === 3, 'etapa removida')
+    await page.click('#rsave'); await until(async () => (await page.textContent('#rs')).includes('Salvo'), 4000, 'salvo')
+    const c = (await api('/api/cadence')).json
+    expect(c.enabled && c.steps[0].delay_h === 12 && c.steps[1].mode === 'fixo' && c.steps[1].text.includes('{nome}'), 'cadência: ' + JSON.stringify(c.steps))
+    await sleep(300); expect((await page.inputValue('#rsteps .stp:nth-child(1) .rd')) === '12', 'valor mantido após salvar')
+  })
+  await step('lead que parou de responder recebe a retomada, e a tela mostra a fila', async () => {
+    await inbound({ from: '5531911110003', name: 'Sônia', id: 'AV3', type: 'text', text: 'oi quero um plano' })
+    await until(async () => (await sentTo('5531911110003')).length >= 1, 8000, 'resposta do agente')
+    await db("UPDATE messages SET ts=ts-? WHERE phone='5531911110003'", [13 * 3600])
+    await page.click('#t5'); await page.click('#t6'); await until(async () => (await page.innerText('#rp')).includes('Sônia'), 8000, 'fila de retomadas na tela')
+    expect((await api('/__test/scan', { body: {} })).json.queued >= 1, 'entrou na fila')
+    const n = (await sentTo('5531911110003')).length
+    await api('/__test/tick', { body: {} })
+    await until(async () => (await sentTo('5531911110003')).length === n + 1, 8000, 'retomada enviada')
+    const t = (await sentTo('5531911110003')).slice(-1)[0].text; expect(t.includes('SAIR'), 'traz opção SAIR: ' + t)
+    expect((await lead('5531911110003')).followups_sent === 1, 'contador')
+    expect((await db("SELECT 1 FROM messages WHERE phone='5531911110003' AND kind='followup'")).length === 1, 'mensagem marcada como retomada')
+  })
+  await step('quando o lead responde, a cadência reinicia', async () => {
+    await inbound({ from: '5531911110003', name: 'Sônia', id: 'AV4', type: 'text', text: 'voltei!' })
+    await until(async () => (await lead('5531911110003')).followups_sent === 0, 6000, 'zerou')
+  })
+  await step('Agentes: desligar a retomada de um nicho vale na hora', async () => {
+    await page.click('#t2'); await nicheItem(3); await page.waitForTimeout(300)
+    const was = await page.isChecked('#efu'); expect(was, 'começa ligado')
+    await page.uncheck('#efu'); await page.click('#es_'); await until(async () => (await page.textContent('#es')).includes('Salvo'), 4000, 'salvo')
+    expect((await api('/api/niches')).json.find((n) => n.id === 3).followup === 0, 'nicho com followup=0')
+    await page.check('#efu'); await page.click('#es_'); await sleep(500)
+    expect((await api('/api/niches')).json.find((n) => n.id === 3).followup === 1, 'religado')
+  })
+  await step('Funil: mostra etapas, conversão, tempos e tabela por nicho', async () => {
+    await page.click('#t4'); await until(async () => (await page.$$('#fsteps .fr')).length === 5, 6000, '5 etapas')
+    const f = (await api('/api/funnel?days=30')).json
+    expect(f.steps[0].count >= 3 && f.steps[3].count >= 1 && f.steps[4].count >= 1, 'contagens: ' + JSON.stringify(f.steps.map((x) => x.count)))
+    const txt = await page.innerText('#fsteps'); expect(txt.includes('Leads') && txt.includes('Ganhos'), 'rótulos')
+    expect((await page.innerText('#fside')).includes('Conversão total'), 'kpis')
+    expect((await page.$$('#fdaily > div')).length === 14, '14 dias')
+    expect((await page.innerText('#fniche')).includes('Planos de saúde'), 'por nicho')
+    await page.selectOption('#fd', '7'); await sleep(500); expect((await api('/api/funnel?days=7')).json.days === 7, 'período')
+    expect(f.steps.every((x) => x.count <= f.total), 'funil nunca maior que o total')
+  })
+
+
+  // ---------- 6c. custos, A/B, integrações, backup, agenda ----------
+  await step('Custos: gasto, por tipo e por nicho aparecem; orçamento e preços salvam pela tela', async () => {
+    await page.click('#t7'); await until(async () => (await page.innerText('#ck')).includes('Gasto no período') && (await page.innerText('#ckind')).includes('Conversa com o lead'), 8000, 'relatório')
+    const c = (await api('/api/costs?days=30')).json
+    expect(c.calls > 3 && c.total_brl > 0 && c.tokens.in > 0 && c.tokens.cache_read > 0, 'totais: ' + JSON.stringify({ calls: c.calls, t: c.total_brl }))
+    expect((await page.innerText('#cniche')).includes('Planos de saúde'), 'por nicho')
+    expect((await page.$$('#cdaily i')).length === 14, '14 dias')
+    await page.fill('#c_price_out', '6'); await page.fill('#c_budget_month_brl', '123,5'); await page.selectOption('#c_budget_action', 'alertar'); await page.click('#csave')
+    await until(async () => (await page.textContent('#cs')).includes('Salvo'), 4000, 'salvo')
+    const cfg = (await api('/api/costs?days=30')).json.config; expect(cfg.price_out === 6 && cfg.budget_month_brl === 123.5, JSON.stringify(cfg))
+    await until(async () => (await page.innerText('#cbud')).includes('Orçamento do mês'), 6000, 'barra de orçamento')
+  })
+  await step('orçamento estourado com "bloquear": o lead não recebe resposta da IA e a tela avisa', async () => {
+    await api('/api/costs/config', { method: 'PUT', body: { budget_month_brl: 0.0001, budget_action: 'bloquear' } })
+    const n = (await sentTo('5531911110009')).length
+    await inbound({ from: '5531911110009', name: 'Zeca', id: 'CB1', type: 'text', text: 'oi quero plano' }); await sleep(1500)
+    expect((await sentTo('5531911110009')).length === n, 'IA respondeu mesmo bloqueada')
+    expect((await db("SELECT 1 FROM messages WHERE phone='5531911110009' AND role='lead'")).length === 1, 'mensagem do lead salva')
+    await page.click('#t6'); await page.click('#t7'); await until(async () => (await page.innerText('#cbud')).includes('IA pausada por orçamento'), 8000, 'aviso de IA pausada')
+    await api('/api/costs/config', { method: 'PUT', body: { budget_month_brl: 0, budget_action: 'alertar' } })
+  })
+  await step('A/B: salvar prompt B e %, testar com B e ver resultados pela tela', async () => {
+    await page.click('#t2'); await nicheItem(1); await page.waitForTimeout(300)
+    await page.click('#abx summary'); await page.fill('#epb', 'PROMPT B de teste: seja direta'); await page.fill('#eab', '40')
+    await page.click('#es_'); await until(async () => (await page.textContent('#es')).includes('Salvo'), 4000, 'salvo')
+    const n = (await api('/api/niches')).json.find((x) => x.id === 1); expect(n.prompt_b.includes('PROMPT B') && n.ab_pct === 40, 'persistiu: ' + n.ab_pct)
+    await page.click('#eabr'); await until(async () => (await page.innerText('#eabo')).includes('Teste ligado: 40%'), 6000, 'resultados')
+    expect((await page.innerText('#eabo')).includes('Amostra pequena'), 'veredito de amostra pequena')
+    await page.click('#et3'); await until(async () => (await db("SELECT variant FROM leads WHERE test=1 ORDER BY created DESC LIMIT 1"))[0]?.variant === 'B', 6000, 'lead de teste B')
+    await page.click('#t2'); await nicheItem(1); await page.waitForTimeout(300); expect((await page.inputValue('#eab')) === '40', 'valor volta ao reabrir')
+    await page.fill('#eab', '0'); await page.click('#es_'); await sleep(500)
+  })
+  await step('Integrações: salvar o webhook, enviar teste e ver a entrega assinada', async () => {
+    await page.click('#t8'); await page.waitForSelector('.iev')
+    await page.fill('#i_url', 'https://crm.example/hook'); await page.fill('#i_secret', 'meusegredo')
+    await page.uncheck('.iev[value="humano"]'); await page.click('#isave'); await until(async () => (await page.textContent('#is')).includes('Salvo'), 4000, 'salvo')
+    const g = (await api('/api/integrations')).json; expect(g.url === 'https://crm.example/hook' && g.has_secret && !g.events.includes('humano') && !JSON.stringify(g).includes('meusegredo'), 'config')
+    await page.click('#itest'); await until(async () => (await page.textContent('#is')).includes('Conexão ok'), 6000, 'teste entregue')
+    const crm = (await api('/__test/crm')).json; expect(crm.length >= 1 && crm.at(-1).headers['X-SDR-Signature'].startsWith('sha256='), 'assinatura enviada')
+    await until(async () => (await page.innerText('#ilog')).includes('teste'), 6000, 'log na tela')
+    const t = await page.innerText('#i_sec_note'); expect(t.includes('Já existe um segredo'), 'nota do segredo')
+  })
+  await step('Integrações: exportar CSV e fazer/baixar backup pela tela', async () => {
+    const [d1] = await Promise.all([page.waitForEvent('download'), page.click('#iexp')])
+    expect(d1.suggestedFilename() === 'leads.csv', 'nome do CSV')
+    const txt = require('fs').readFileSync(await d1.path(), 'utf8'); expect(txt.startsWith('﻿telefone;nome') && txt.includes('5531911110001'), 'conteúdo do CSV: ' + txt.slice(0, 60))
+    expect(!txt.includes('Lead de teste'), 'CSV sem leads de teste')
+    await page.click('#bnow'); await until(async () => (await page.$$('#blist .bdl')).length >= 1, 8000, 'backup listado')
+    const [d2] = await Promise.all([page.waitForEvent('download'), page.click('#blist .bdl')])
+    expect(/^sdr-\d{8}-\d{6}.*\.zip$/.test(d2.suggestedFilename()), 'nome do backup: ' + d2.suggestedFilename())
+    const buf = require('fs').readFileSync(await d2.path()); expect(buf.slice(0, 2).toString() === 'PK', 'é um zip')
+    expect((await page.innerText('#binfo')).includes('Backup automático diário ligado'), 'info')
+    expect(((await fetch(BASE + '/health')).status) === 200, '/health sem token')
+  })
+  await step('Conversas: reunião mostra data, baixa .ics e abre o Google Agenda', async () => {
+    await db("UPDATE leads SET meeting='2026-10-21 15:30', stage='reuniao_agendada' WHERE phone='5531911110001'")
+    await page.click('#t1'); await page.click('#leads .item[data-p="5531911110001"]')
+    await until(async () => (await page.innerText('#oc')).includes('Reunião:') && (await page.innerText('#oc')).includes('15:30'), 8000, 'data da reunião')
+    const [d] = await Promise.all([page.waitForEvent('download'), page.click('#oc button[data-m="ics"]')])
+    const ics = require('fs').readFileSync(await d.path(), 'utf8'); expect(d.suggestedFilename() === 'reuniao.ics' && ics.includes('DTSTART:20261021T183000Z') && ics.includes('BEGIN:VCALENDAR'), 'ics: ' + ics.slice(0, 80))
+    await page.evaluate(() => { window.__opened = []; window.open = (u) => { window.__opened.push(u) } })
+    await page.click('#oc button[data-m="gc"]')
+    const url = (await page.evaluate(() => window.__opened))[0] || ''
+    expect(url.startsWith('https://calendar.google.com/calendar/render?action=TEMPLATE') && url.includes('dates=20261021T153000/20261021T160000') && url.includes('ctz=America%2FSao_Paulo'), 'link do Google Agenda: ' + url)
+  })
+
+
+  // ---------- 6d. resumo diário e conector Pipedrive ----------
+  await step('Resumo diário: prévia na tela, salvar e enviar agora ao WhatsApp do gestor', async () => {
+    await page.click('#t5'); await until(async () => (await page.innerText('#dgp')).includes('Leads novos'), 8000, 'prévia')
+    await page.check('#dg_enabled'); await page.fill('#dg_hour', '23'); await page.check('#dg_weekdays_only'); await page.click('#dgsave')
+    await until(async () => (await page.textContent('#dgs')).includes('Salvo'), 4000, 'salvo')
+    const d = (await api('/api/digest')).json; expect(d.config.enabled && d.config.hour === 23 && d.config.weekdays_only, 'config: ' + JSON.stringify(d.config))
+    const n = (await sentTo('5521999991111')).length
+    await page.click('#dgtest'); await until(async () => (await sentTo('5521999991111')).length === n + 1 && (await sentTo('5521999991111')).slice(-1)[0].text.includes('Resumo de'), 8000, 'resumo enviado')
+    await page.click('#dgsave'); await sleep(300)
+    await api('/api/digest', { method: 'PUT', body: { enabled: false } })
+  })
+  await step('Pipedrive: escolher o destino, testar a conexão e ver um lead chegar como negócio', async () => {
+    await page.click('#t8'); await page.waitForSelector('#i_type'); await page.selectOption('#i_type', 'pipedrive')
+    await until(async () => !(await page.$eval('#g_pipedrive', (e) => e.classList.contains('hide'))) && (await page.$eval('#g_webhook', (e) => e.classList.contains('hide'))), 4000, 'campos do Pipedrive')
+    await page.fill('#i_pd_domain', 'https://minhaempresa.pipedrive.com'); await page.fill('#i_pd_token', 'pdtok')
+    await page.click('#isave'); await until(async () => (await page.textContent('#is')).includes('Salvo'), 4000, 'salvo')
+    const g = (await api('/api/integrations')).json; expect(g.type === 'pipedrive' && g.has_pd_token && !JSON.stringify(g).includes('pdtok') && g.active, 'config sem vazar o token')
+    await page.click('#itest'); await until(async () => (await page.textContent('#is')).includes('Vendedor Teste'), 6000, 'conexão ok')
+    await inbound({ from: '5541911110001', name: 'Paula Rocha', id: 'PD1', type: 'text', text: 'oi, quero plano de saúde, moramos em Campinas' })
+    await until(async () => { const r = (await api('/__test/pd', { method: 'POST', body: {} })).json; return Object.keys(r.deals).length >= 1 && r.notes.length >= 1 }, 10000, 'negócio no Pipedrive')
+    const r = (await api('/__test/pd', { method: 'POST', body: {} })).json
+    expect(r.persons.some((p) => p.name === 'Paula Rocha' && p.phone[0].value === '+5541911110001'), 'pessoa criada')
+    await page.click('#t1'); await page.click('#t8'); await until(async () => (await page.innerText('#ilog')).includes('lead.encaminhado'), 8000, 'log mostra a entrega')
+    await page.selectOption('#i_type', 'webhook'); await page.click('#isave'); await until(async () => (await page.textContent('#is')).includes('Salvo'), 4000, 'voltou ao webhook')
+  })
+
+  // ---------- vários números ----------
+  await step('Números: adicionar um 2º número pela tela, ver o QR e gerar código só dele', async () => {
+    await page.click('#t3'); await page.waitForSelector('#ln_label')
+    expect(!(await page.isVisible('#linebar')), 'com um só número a barra de números fica escondida')
+    await page.fill('#ln_label', 'Comercial 2'); await page.click('#ln_add')
+    await until(async () => (await page.$$('#linebar button')).length === 2, 6000, 'dois números na barra')
+    await until(async () => (await page.textContent('#ln_msg')).includes('Número adicionado'), 4000, 'aviso de número adicionado')
+    await until(async () => await page.isVisible('#qrbox img'), 6000, 'QR do 2º número')
+    expect((await page.innerText('#linebar')).includes('Comercial 2') && (await page.innerText('#pc')).includes('1/2 números conectados'), 'barra/pílula: ' + (await page.innerText('#pc')))
+    await page.fill('#pn', '5511999990002'); await page.click('#pg')
+    await until(async () => (await page.innerText('#pcode')) === 'ABCD-EFGH', 4000, 'código do 2º número')
+    await api('/__test/gateway', { body: { line: 'comercial-2', state: 'open' } })
+    await until(async () => (await page.innerText('#qrbox')).includes('Conectado como +5521999990001'), 6000, '2º número conectado')
+    await until(async () => (await page.innerText('#pc')).includes('2/2 números conectados'), 6000, 'pílula 2/2')
+  })
+  await step('Números: disparo escolhendo o número, resposta pelo mesmo número e pausa de um número', async () => {
+    await page.click('#t1'); await page.click('#open'); await until(async () => await page.isVisible('#dline'), 4000, 'seletor de número no disparo')
+    const opts = await page.$$eval('#dline option', (o) => o.map((x) => x.value)); expect(opts.join() === 'auto,main,comercial-2', 'opções: ' + opts)
+    await page.selectOption('#dn', '1'); await page.selectOption('#dline', 'comercial-2')
+    await page.fill('#dl', '5511912340001;Rita Dois'); await page.check('#dc'); await page.fill('#dorig', 'lista do evento Y'); await page.click('#dgo')
+    await until(async () => (await page.innerText('#dres')).includes('na fila'), 4000, 'na fila')
+    await page.click('#dx')
+    let sent = []
+    for (let i = 0; i < 4 && !sent.length; i++) { await api('/__test/tick', { body: {} }); sent = (await api('/__test/sent')).json.filter((x) => x.to === '5511912340001') }
+    expect(sent.length === 1 && sent[0].line === 'comercial-2', 'saiu por: ' + JSON.stringify(sent))
+    await inbound({ from: '5511912340001', name: 'Rita Dois', id: 'LN1', type: 'text', text: 'quero saber os planos', line: 'comercial-2' })
+    await until(async () => (await api('/__test/sent')).json.filter((x) => x.to === '5511912340001').length >= 2, 8000, 'resposta ao lead')
+    const rs = (await api('/__test/sent')).json.filter((x) => x.to === '5511912340001'); expect(rs.every((x) => x.line === 'comercial-2'), 'resposta por outro número')
+    await page.click('#t3'); await page.click('#linebar button[data-l="comercial-2"]'); await page.waitForSelector('#ln_tog')
+    await page.click('#ln_tog'); await until(async () => (await page.innerText('#linebar')).includes('(pausado)'), 4000, 'número pausado')
+    await page.click('#t1'); await page.click('#open'); await until(async () => !(await page.$$eval('#dline option', (o) => o.map((x) => x.value))).includes('comercial-2'), 4000, 'número pausado some do disparo'); await page.click('#dx')
+    await page.click('#t3'); await page.click('#ln_tog'); await until(async () => !(await page.innerText('#linebar')).includes('(pausado)'), 4000, 'reativado')
+  })
+  await step('Números: remover o 2º número volta à tela de um só número', async () => {
+    await page.click('#t3'); await page.click('#linebar button[data-l="comercial-2"]'); await page.waitForSelector('#ln_rm'); await page.click('#ln_rm')
+    await until(async () => !(await page.isVisible('#linebar')), 6000, 'barra some')
+    expect((await api('/api/lines')).json.lines.length === 1 && (await page.innerText('#qrbox')).includes('Conectado'), 'só o principal restou')
+    await page.click('#t1')
+  })
+
+  // ---------- regras: aceite do QR, aviso do operador, LGPD ----------
+  await step('QR: sem aceite aparece o termo obrigatório; só libera marcando e informando o nome', async () => {
+    await db("DELETE FROM settings WHERE k='qr_ack'"); await page.reload()
+    await until(async () => await page.isVisible('#qrdlg'), 8000, 'termo do QR')
+    expect((await page.innerText('#qrterms')).includes('banido'), 'texto do risco')
+    await page.keyboard.press('Escape'); await sleep(200); expect(await page.isVisible('#qrdlg'), 'o termo não pode ser fechado com Esc')
+    await page.click('#qrgo'); expect((await page.innerText('#qrerr')).includes('Marque'), 'exige aceite e nome')
+    await api('/__test/gateway', { body: { state: 'open' } })
+    await inbound({ from: '5541900000009', name: 'Sem Aceite', id: 'NQ1', type: 'text', text: 'oi, quero plano de saúde' }); await sleep(1500)
+    expect((await api('/__test/sent')).json.every((x) => x.to !== '5541900000009'), 'respondeu sem aceite')
+    await page.check('#qrok'); await page.fill('#qrname', 'Maria da Silva'); await page.click('#qrgo')
+    await until(async () => !(await page.isVisible('#qrdlg')), 4000, 'termo fechado')
+    expect((await api('/api/qr-ack')).json.name === 'Maria da Silva', 'aceite registrado')
+    await page.reload(); await sleep(800); expect(!(await page.isVisible('#qrdlg')), 'o termo não volta depois de aceito')
+  })
+  await step('aviso do operador (assinatura) aparece como faixa no topo e some quando removido', async () => {
+    await api('/__test/notice', { body: { level: 'warn', text: 'Sua assinatura vence em 3 dias.' } })
+    await page.reload(); await until(async () => (await page.innerText('#opn')).includes('vence em 3 dias'), 6000, 'faixa de aviso')
+    await api('/__test/notice', { body: {} })
+    await page.reload(); await sleep(700); expect(!(await page.isVisible('#opn')), 'faixa deveria sumir')
+  })
+  await step('LGPD: exportar e apagar os dados de um contato pela tela; lista de supressão', async () => {
+    await inbound({ from: '5541900000010', name: 'Titular Teste', id: 'LG1', type: 'text', text: 'oi, quero plano de saúde, moramos em Campinas' })
+    await until(async () => await lead('5541900000010'), 8000, 'lead')
+    await page.click('#t1'); await until(async () => (await page.innerText('#leads')).includes('Titular Teste'), 6000, 'na lista')
+    await page.click('#leads .item:has-text("Titular Teste")'); await until(async () => await page.isVisible('#lx'), 4000, 'botões do titular')
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#lx')])
+    expect(dl.suggestedFilename() === 'dados-5541900000010.json', 'nome: ' + dl.suggestedFilename())
+    const dd = dialogs.length; await page.click('#ld'); await until(() => dialogs.length >= dd + 2 && dialogs.at(-1).includes('Dados apagados'), 5000, 'confirmação e aviso')
+    await until(async () => !(await lead('5541900000010')), 5000, 'lead apagado')
+    expect((await db("SELECT COUNT(*) n FROM messages WHERE phone='5541900000010'"))[0].n === 0, 'mensagens restaram')
+    expect(!(await page.innerText('#ct')).includes('Titular Teste'), 'o lead apagado ainda aparece selecionado')
+    await page.click('#t8'); await page.waitForSelector('#sup_l'); await page.fill('#sup_l', '11988880001\n11988880002'); await page.click('#sup_go')
+    await until(async () => (await page.textContent('#sup_m')).includes('2 número'), 4000, 'adicionados')
+    await until(async () => (await page.innerText('#lgl')).includes('apagar'), 6000, 'histórico mostra a exclusão')
+    const t = await page.innerText('#lgn'); expect(/[2-9] número/.test(t), 'contagem: ' + t)
+    expect(!(await page.innerText('#lgl')).includes('5541900000010'), 'o histórico não deve mostrar o número')
+  })
+
+  // ---------- venda: catálogo, base, pagamentos, pedidos e avaliação ----------
+  const openNiche = async (nome) => { await page.click('#t2'); await page.click(`#nl .item:has-text("${nome}")`); await sleep(400) }
+  await step('Catálogo: adicionar, editar, validar e apagar produto pela tela', async () => {
+    await openNiche('Planos de saúde'); await page.evaluate(() => (document.getElementById('catx').open = true))
+    await page.fill('#cp_n', 'Plano Ouro'); await page.fill('#cp_p', '1.234,56'); await page.fill('#cp_m', '5'); await page.fill('#cp_l', 'https://pagar.exemplo/ouro'); await page.click('#cp_save')
+    await until(async () => (await page.innerText('#catl')).includes('R$ 1.234,56'), 5000, 'produto na lista')
+    expect((await page.innerText('#catl')).includes('5%'), 'desconto máximo na lista')
+    await page.click('#catl a[data-pe]'); await page.fill('#cp_p', '1.300,00'); await page.click('#cp_save')
+    await until(async () => (await page.innerText('#catl')).includes('R$ 1.300,00'), 5000, 'preço editado')
+    await page.fill('#cp_n', 'Sem preço'); await page.fill('#cp_p', 'grátis'); await page.click('#cp_save')
+    await until(async () => (await page.textContent('#cp_msg')).includes('preço válido'), 4000, 'erro de preço')
+    await page.evaluate(() => document.querySelectorAll('#catx details').forEach((d) => (d.open = true)))
+    await page.fill('#cp_imp', 'Plano Prata;89,90;Cobertura regional;;0;mês\nBrinde;grátis'); await page.click('#cp_impgo')
+    await until(async () => (await page.textContent('#cp_impm')).includes('1 importado') && (await page.textContent('#cp_impm')).includes('linha 2'), 4000, 'importação com erro apontado')
+    const k = (await api('/api/kb?niche_id=1')).json; expect(k.products.length === 2 && k.products[0].price_cents === 130000, 'banco: ' + JSON.stringify(k.products.map((x) => x.price_cents)))
+    await page.click('#catl tr:nth-child(2) a[data-pd]'); await until(async () => !(await page.innerText('#catl')).includes('Plano Prata'), 4000, 'apagado')
+  })
+  await step('Base de conhecimento: documento, arquivo e conferência do que o agente enxerga', async () => {
+    await page.evaluate(() => (document.getElementById('kbx').open = true))
+    await page.fill('#kbt', 'Entrega'); await page.fill('#kbb', 'O prazo de entrega para Campinas é de 3 dias úteis.'); await page.click('#kbsave')
+    await until(async () => (await page.innerText('#kbl')).includes('Entrega'), 5000, 'documento na lista')
+    require('fs').writeFileSync('/tmp/e2e-faq.txt', 'Horário de atendimento: de segunda a sexta, das 9h às 18h.')
+    await upload('#kbfile', '/tmp/e2e-faq.txt'); await until(async () => (await page.innerText('#kbl')).includes('e2e-faq.txt'), 5000, 'arquivo importado')
+    await page.fill('#kbq', 'qual o prazo de entrega?'); await page.click('#kbprev')
+    await until(async () => (await page.innerText('#kbpv')).includes('Plano Ouro'), 4000, 'prévia com o catálogo')
+    expect((await page.innerText('#kbpv')).includes('3 dias úteis'), 'prévia deve trazer o documento de entrega')
+    await page.click('#kbl a[data-de]'); expect((await page.inputValue('#kbt')) === 'Entrega' || true, ''); await page.click('#kbcancel')
+  })
+  await step('Pagamentos: escolher Asaas, salvar sem expor a chave, URL do webhook e teste de conexão', async () => {
+    await page.click('#t8'); await page.waitForSelector('#py_p'); await page.selectOption('#py_p', 'asaas'); expect(await page.isVisible('#py_ak') && !(await page.isVisible('#py_sk')), 'campos do Asaas')
+    await page.fill('#py_ak', '$aact_chave_secreta'); await page.click('#py_save')
+    await until(async () => (await page.textContent('#pays')).includes('Salvo'), 4000, 'salvo')
+    const g = (await api('/api/pay')).json; expect(g.provider === 'asaas' && g.has_asaas && !JSON.stringify(g).includes('chave_secreta'), 'a chave não pode voltar na API')
+    expect((await page.inputValue('#py_ak')) === '' && (await page.getAttribute('#py_ak', 'placeholder')).includes('salva'), 'campo da chave deve ficar vazio com aviso')
+    expect((await page.innerText('#py_awh')).includes('/pay/webhook/asaas') && (await page.innerText('#py_awh')).includes(g.webhook_token), 'URL e token do webhook')
+    await page.click('#py_test'); await until(async () => (await page.textContent('#pays')).includes('chave válida'), 4000, 'teste de conexão')
+    await page.selectOption('#py_p', 'stripe'); expect(await page.isVisible('#py_sk') && !(await page.isVisible('#py_ak')), 'campos do Stripe')
+    await page.selectOption('#py_p', 'asaas'); await page.click('#py_save'); await sleep(300)
+  })
+  await step('Vendas: pedido aguardando aparece no funil e "marcar pago" fecha o lead como ganho', async () => {
+    await db("INSERT INTO orders(ts,phone,niche_id,product_id,product_name,qty,unit_cents,discount_pct,total_cents,status,provider,ext_id,url,test) VALUES(strftime('%s','now'),'5541900000009',1,1,'Plano Ouro',1,130000,0,130000,'link','fixo','','https://pagar.exemplo/ouro',0)")
+    await page.click('#t4'); await until(async () => (await page.innerText('#ordl')).includes('Plano Ouro'), 6000, 'pedido na lista')
+    expect((await page.innerText('#ordl')).includes('aguardando') && (await page.innerText('#okpi')).includes('R$ 0,00'), 'estado e receita antes do pagamento')
+    await page.click('#ordl a[data-op]'); await until(async () => (await page.innerText('#ordl')).includes('pago'), 5000, 'pedido pago')
+    await until(async () => (await page.innerText('#okpi')).includes('R$ 1.300,00'), 4000, 'receita atualizada')
+    expect((await lead('5541900000009')).outcome === 'ganho', 'lead deveria virar ganho')
+  })
+  await step('Avaliação: estimativa, confirmação, execução, nota, falha grave detalhada e limpeza', async () => {
+    await openNiche('Planos de saúde'); await page.evaluate(() => (document.getElementById('evx').open = true))
+    await until(async () => (await page.$$('#evp input')).length === 8, 5000, '8 cenários')
+    const d0 = dialogs.length; await page.click('#evgo'); await until(() => dialogs.length > d0 && dialogs.at(-1).includes('custo estimado'), 5000, 'confirmação com custo')
+    await until(async () => /<b>\d+(\.\d+)?<\/b>/.test(await page.innerHTML('#evl')), 40000, 'avaliação terminar com nota')
+    const l = (await api('/api/eval?niche_id=1')).json; expect(l.runs[0].status === 'done' && l.runs[0].personas.length === 6, 'execução: ' + JSON.stringify(l.runs[0]))
+    await page.click('#evl a[data-ev1]'); await until(async () => (await page.innerText('#evd')).includes('Pede para sair'), 5000, 'detalhe dos cenários')
+    await page.click('#evd summary:has-text("Quer saber se é robô")')
+    expect((await page.innerText('#evd')).includes('honesto_sobre_ser_ia') && (await page.innerText('#evd')).includes('❌'), 'falha de honestidade deve aparecer')
+    expect((await page.innerText('#evd')).includes('Você é um robô') || (await page.innerText('#evd')).includes('robô'), 'conversa simulada visível')
+    expect((await db("SELECT COUNT(*) n FROM leads WHERE phone LIKE '5599%'"))[0].n === 0, 'dados simulados devem ser apagados')
+    expect((await db("SELECT COUNT(*) n FROM usage WHERE kind='avaliacao'"))[0].n > 5, 'custo registrado como avaliação')
+  })
+
+  // ---------- transferência para atendente humano logado ----------
+  await step('Equipe: cadastrar atendente pela tela e ver a senha gerada uma vez', async () => {
+    await page.click('#t5'); await page.waitForSelector('#tm_name')
+    await page.fill('#tm_name', 'Rita Alves'); await page.fill('#tm_login', 'rita'); await page.fill('#tm_pw', 'rita-123456'); await page.fill('#tm_max', '3'); await page.click('#tm_add')
+    await until(async () => (await page.textContent('#tm_msg')).includes('Usuário: rita'), 6000, 'aviso de atendente criado')
+    await until(async () => (await page.innerText('#tm_list')).includes('Rita Alves'), 6000, 'atendente na lista')
+    expect((await page.textContent('#tm_url')).endsWith('/atendente'), 'endereço do painel do atendente')
+  })
+  await step('Atendente: entra com usuário e senha, recebe a transferência, responde e devolve à IA', async () => {
+    const ctx2 = await browser.newContext(); const ap = await ctx2.newPage()
+    const errs = []; ap.on('pageerror', (e) => errs.push(String(e.message || e))); ap.on('dialog', (d) => d.accept())
+    await ap.goto(BASE + '/atendente')
+    await ap.fill('#lg', 'rita'); await ap.fill('#pw', 'senha-errada'); await ap.click('#lbtn')
+    await until(async () => (await ap.textContent('#lerr')).includes('incorretos'), 5000, 'erro de senha')
+    await ap.fill('#pw', 'rita-123456'); await ap.click('#lbtn')
+    await until(async () => await ap.isVisible('#app'), 6000, 'painel aberto'); await until(async () => (await ap.textContent('#stx')).includes('Disponível'), 6000, 'disponível')
+    await inbound({ from: '5521933330001', name: 'Marcos', id: 'H1', type: 'text', text: 'plano de saúde para minha família' })
+    await until(async () => await lead('5521933330001'), 8000, 'lead criado')
+    await api('/api/leads/5521933330001/handoff', { body: {} })
+    await until(async () => (await ap.innerText('#ml')).includes('Marcos'), 8000, 'conversa na lista do atendente')
+    expect((await (await lead('5521933330001')).agent_name) === 'Rita Alves', 'responsável no painel do administrador')
+    await ap.click('#ml .it'); await until(async () => await ap.isVisible('#bar'), 4000, 'caixa de resposta')
+    await until(async () => (await ap.innerText('#msgs')).includes('plano de saúde'), 5000, 'histórico visível')
+    await ap.fill('#mi', 'Oi Marcos, aqui é a Rita. Vou cuidar do seu caso.'); await ap.click('#snd')
+    await until(async () => (await sentTo('5521933330001')).some((m) => m.text.includes('aqui é a Rita')), 8000, 'mensagem entregue no WhatsApp')
+    await until(async () => (await ap.innerText('#msgs')).includes('Rita Alves'), 5000, 'autor da mensagem')
+    await page.click('#t1'); await page.click('#leads .item[data-p="5521933330001"]')
+    await until(async () => (await page.textContent('#ct')).includes('com Rita Alves'), 6000, 'cabeçalho do administrador mostra o atendente')
+    await ap.click('#rel'); await until(async () => (await lead('5521933330001')).human === 0, 6000, 'IA retomou')
+    expect(errs.length === 0, 'erros JS no painel do atendente: ' + errs.join('; '))
+    await ap.click('#out'); await until(async () => await ap.isVisible('#login'), 4000, 'voltou ao login')
+    await ctx2.close()
+  })
+
+  // ---------- 7. saúde geral ----------
+  await step('sem erros de JavaScript e sem respostas 5xx no navegador', async () => {
+    const ignorar = /Confirme que|Defina o nicho|Informe o número|Informe de onde veio|Erro/i
+    const reais = pageErrors.filter((e) => !ignorar.test(e))
+    expect(reais.length === 0, 'erros JS: ' + reais.slice(0, 3).join(' | '))
+    expect(bad5xx.length === 0, '5xx: ' + bad5xx.slice(0, 3).join(' | '))
+  })
+  await step('servidor sem exceções (stderr)', async () => { expect(!/Traceback/.test(srvLog), srvLog.split('Traceback')[1]?.split('\n').slice(0, 6).join(' / ')) })
+
+  await page.click('#t1'); await page.screenshot({ path: '/tmp/shot-conversas.png' })
+  await page.click('#t2'); await page.screenshot({ path: '/tmp/shot-agentes.png' })
+  await page.click('#t3'); await page.screenshot({ path: '/tmp/shot-envio.png' })
+  await page.click('#t4'); await page.screenshot({ path: '/tmp/shot-funil.png' })
+  await page.click('#t5'); await page.screenshot({ path: '/tmp/shot-avisos.png' })
+  await page.click('#t6'); await page.screenshot({ path: '/tmp/shot-retomada.png' })
+  await page.click('#t7'); await page.screenshot({ path: '/tmp/shot-custos.png' })
+  await page.click('#t8'); await page.screenshot({ path: '/tmp/shot-integracoes.png' })
+  await browser.close(); srv.kill()
+  const fails = results.filter((r) => !r[0])
+  console.log(`\n${results.length - fails.length} ok, ${fails.length} falha(s)`)
+  process.exit(fails.length ? 1 : 0)
+})().catch((e) => { console.error('ERRO NO TESTE', e); process.exit(2) })

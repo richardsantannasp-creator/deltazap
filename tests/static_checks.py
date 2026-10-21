@@ -47,7 +47,7 @@ for m in re.finditer(r'@app\.(get|post|put|delete)\("(/api/[^"]+)"(.*?)\)\n', sr
             continue
     if m.group(2).startswith("/api/gestor/") and m.group(2) != "/api/gestor/login":      # rotas do gestor: sessão própria
         body = srv[m.end():m.end() + 400]
-        if "manager_from_token(x_token)" in body:
+        if "manager_from_token(x_token" in body:
             continue
     unauth.append(m.group(2))
 check("todas as rotas /api exigem token (administrador, atendente ou gestor; só os logins e a chave pública de avisos são abertos)", not unauth or sorted(unauth) == ["/api/agent/login", "/api/gestor/login", "/api/push/key"], unauth)

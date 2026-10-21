@@ -759,6 +759,55 @@ const step = async (name, fn) => {
     await ctx3.close()
   })
 
+  await step('Segurança: gestor liga a verificação em duas etapas, sai e entra com o código; supervisor só lê', async () => {
+    const crypto = require('crypto')
+    const totp = (secret, off = 0) => {
+      const al = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = ''
+      for (const ch of secret.replace(/\s/g, '')) bits += al.indexOf(ch).toString(2).padStart(5, '0')
+      const key = Buffer.from(bits.match(/.{8}/g).map((b) => parseInt(b, 2)))
+      const ctr = Buffer.alloc(8); ctr.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000) + off))
+      const h = crypto.createHmac('sha1', key).update(ctr).digest(); const o = h[h.length - 1] & 15
+      return String((h.readUInt32BE(o) & 0x7fffffff) % 1000000).padStart(6, '0')
+    }
+    const ctx4 = await browser.newContext(); const gp = await ctx4.newPage()
+    const errs = []; gp.on('pageerror', (e) => errs.push(String(e.message || e))); gp.on('dialog', (d) => d.accept())
+    await gp.goto(BASE + '/gestor'); await gp.fill('#lg', 'gil'); await gp.fill('#pw', 'gil-123456'); await gp.click('#lbtn')
+    await until(async () => await gp.isVisible('#app'), 6000, 'painel do gestor')
+    await gp.click('#secb'); await gp.click('#sec_go')
+    await until(async () => (await gp.textContent('#sec_key')).replace(/\s/g, '').length === 32, 5000, 'chave do app autenticador')
+    const secret = await gp.textContent('#sec_key')
+    await gp.fill('#sec_cd', '000000'); await gp.click('#sec_ok')
+    await until(async () => (await gp.textContent('#sec_err')).length > 0, 5000, 'código errado recusado')
+    await gp.fill('#sec_cd', totp(secret)); await gp.click('#sec_ok')
+    await until(async () => (await gp.innerText('#sec_codes')).split('\n').length === 8, 5000, 'oito códigos de recuperação')
+    await gp.click('#sec_x'); await gp.click('#out'); await until(async () => await gp.isVisible('#login'), 4000, 'voltou ao login')
+    await gp.fill('#lg', 'gil'); await gp.fill('#pw', 'gil-123456'); await gp.click('#lbtn')
+    await until(async () => await gp.isVisible('#cdw'), 5000, 'campo do código aparece')
+    await gp.fill('#cd', '000000'); await gp.click('#lbtn')
+    await until(async () => (await gp.textContent('#lerr')).includes('incorreto'), 5000, 'código errado não entra')
+    await gp.fill('#cd', totp(secret, 1)); await gp.click('#lbtn')
+    await until(async () => await gp.isVisible('#app'), 6000, 'entrou com o código')
+    await gp.click('#tabs button[data-t="send"]'); await until(async () => await gp.isVisible('#sd_go'), 6000, 'aba de disparo')
+    await until(async () => (await gp.locator('#sd_n option').count()) > 0, 6000, 'nichos no disparo')
+    await gp.click('#sd_go'); await until(async () => (await gp.textContent('#sd_m')).length > 0, 5000, 'disparo sem número/consentimento é recusado com aviso')
+    expect(errs.length === 0, 'erros JS na aba de disparo: ' + errs.join('; '))
+    await page.click('#t5'); await until(async () => (await page.innerText('#gm_list')).includes('2FA'), 8000, 'administrador vê o 2FA ligado')
+    // supervisor
+    await page.fill('#gm_name', 'Sônia Supervisora'); await page.fill('#gm_login', 'sonia'); await page.fill('#gm_pw', 'sonia-123456'); await page.selectOption('#gm_role', 'supervisor'); await page.click('#gm_add')
+    await until(async () => (await page.innerText('#gm_list')).includes('supervisor'), 6000, 'supervisor na lista')
+    await gp.click('#tabs button[data-t="chats"]')
+    await gp.click('#out'); await gp.fill('#lg', 'sonia'); await gp.fill('#pw', 'sonia-123456'); await gp.click('#lbtn')
+    await until(async () => (await gp.textContent('#who')).includes('supervisor'), 6000, 'entrou como supervisor')
+    const nl = (await db('SELECT COUNT(*) n FROM leads WHERE test=0'))[0].n
+    await until(async () => (await gp.locator('#ll .it').count()) > 0, 6000, 'supervisor vê as conversas de todos (leads reais no banco: ' + nl + ')')
+    await gp.click('#ll .it'); await until(async () => (await gp.locator('#msgs .msg').count()) > 0, 6000, 'supervisor lê a conversa')
+    expect(!(await gp.isVisible('#bar')) && !(await gp.isVisible('#tgs')) && !(await gp.isVisible('#tabs button[data-t="team"]')), 'controles de edição escondidos')
+    const code = await gp.evaluate(async () => (await fetch('/api/gestor/send/5521933330001', { method: 'POST', headers: { 'X-Token': TK, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'oi' }) })).status)
+    expect(code === 403, 'o servidor recusa escrita do supervisor: ' + code)
+    expect(errs.length === 0, 'erros JS: ' + errs.join('; '))
+    await ctx4.close()
+  })
+
   // ---------- 7. saúde geral ----------
   await step('sem erros de JavaScript e sem respostas 5xx no navegador', async () => {
     const ignorar = /Confirme que|Defina o nicho|Informe o número|Informe de onde veio|Erro/i

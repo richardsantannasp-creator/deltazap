@@ -51,6 +51,8 @@ table{width:100%;border-collapse:collapse}td,th{padding:7px 6px;border-bottom:1p
 .empty{margin:auto;color:var(--mut);padding:24px;text-align:center}
 .back{display:none}
 @media(max-width:860px){#chats{grid-template-columns:1fr}.cv{display:none}#chats.inchat .lst{display:none}#chats.inchat .cv{display:grid}.back{display:inline-block}}
+dialog{border:1px solid var(--bd);border-radius:12px;background:var(--card);color:var(--tx);width:min(420px,94vw);padding:16px}dialog::backdrop{background:rgba(0,0,0,.45)}dialog input{width:100%;box-sizing:border-box}
+body.ro #tk,body.ro #rl,body.ro #ho,body.ro #bar,body.ro #tgs,body.ro [data-t="wa"],body.ro [data-t="team"],body.ro [data-t="send"],body.ro #blk{display:none!important}
 </style>
 </head>
 <body>
@@ -60,14 +62,15 @@ table{width:100%;border-collapse:collapse}td,th{padding:7px 6px;border-bottom:1p
   <div class="note">Entre com o usuário e a senha que o administrador criou para você.</div>
   <div><label for="lg">Usuário</label><input id="lg" autocomplete="username" required></div>
   <div><label for="pw">Senha</label><input id="pw" type="password" autocomplete="current-password" required></div>
+  <div id="cdw" class="hide"><label for="cd">Código de verificação</label><input id="cd" autocomplete="one-time-code" inputmode="text" maxlength="13"></div>
   <div class="err" id="lerr" role="alert"></div>
   <button id="lbtn">Entrar</button>
  </form>
 </div>
 
 <div id="app" class="hide">
- <header><b id="who"></b><span class="note" id="sub"></span><span class="sp"></span><button class="g" id="pushb">Ativar avisos</button><button class="g" id="out">Sair</button></header>
- <nav id="tabs"><button data-t="chats" class="on">Conversas</button><button data-t="wa">Meu WhatsApp</button><button data-t="team">Minha equipe</button><button data-t="board">Quadro</button><button data-t="perf">Desempenho</button><button data-t="hist">Histórico</button></nav>
+ <header><b id="who"></b><span class="note" id="sub"></span><span class="sp"></span><button class="g" id="pushb">Ativar avisos</button><button class="g" id="secb">Segurança</button><button class="g" id="out">Sair</button></header>
+ <nav id="tabs"><button data-t="chats" class="on">Conversas</button><button data-t="wa">Meu WhatsApp</button><button data-t="team">Minha equipe</button><button data-t="send">Disparo e agenda</button><button data-t="board">Quadro</button><button data-t="perf">Desempenho</button><button data-t="hist">Histórico</button></nav>
  <div class="pane" id="p_chats"><div id="chats">
   <div class="lst"><div class="lf"><input id="lf_q" placeholder="Buscar nome, telefone ou empresa"><select id="lf_s"><option value="">Todas as etapas</option></select><select id="lf_t"><option value="">Todas as etiquetas</option></select></div><div id="ll"></div></div>
   <div class="cv">
@@ -89,6 +92,24 @@ table{width:100%;border-collapse:collapse}td,th{padding:7px 6px;border-bottom:1p
    <div class="row"><div><label>Nome</label><input id="an"></div><div><label>Usuário</label><input id="al" autocomplete="off"></div><div><label>Senha (vazio = gerar)</label><input id="ap" autocomplete="off"></div><div style="flex:0 0 100px"><label>Máx. conversas</label><input id="am" inputmode="numeric" value="5"></div><button id="aadd">Adicionar</button></div>
    <div class="note" id="amsg"></div></div>
  </div></div>
+
+ <div class="pane hide" id="p_send"><div class="wrap">
+  <div class="card"><h2>Disparar para os meus contatos <span class="note" id="sq"></span></h2>
+   <div class="warn">Só envie para quem <b>aceitou receber</b> mensagem. A conexão por QR code não é oficial e o WhatsApp pode bloquear o número. Quem responder SAIR nunca mais recebe. O envio sai pelo <b>seu</b> número, devagar e com pausas, no ritmo definido pelo administrador.</div>
+   <div class="row"><div><label for="sd_n">Nicho (abertura da conversa)</label><select id="sd_n"></select></div><div><label for="sd_l">Enviar pelo número</label><select id="sd_l"></select></div></div>
+   <div class="note" id="sd_open"></div>
+   <label for="sd_t">Contatos (um por linha: telefone;nome;empresa;contexto)</label><textarea id="sd_t" rows="5" placeholder="5521999990001;Ana;Loja A;pediu orçamento"></textarea>
+   <div class="row" style="align-items:center"><button class="g" id="sd_up">Importar planilha (.csv / .xlsx)</button><input type="file" id="sd_f" accept=".csv,.xlsx,.xlsm,.txt" class="hide"><span class="note" id="sd_res"></span></div>
+   <label for="sd_o">De onde veio o consentimento destes contatos</label><input id="sd_o" maxlength="200" placeholder="Ex.: formulário do site em 10/2026, lista do evento X">
+   <label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" id="sd_c" style="margin-top:3px"> Confirmo que estes contatos deram consentimento (opt-in) para receber mensagens e que respeitarei o pedido de SAIR.</label>
+   <div class="row" style="align-items:center"><button id="sd_go">Colocar na fila de envio</button><button class="g" id="sd_clr">Limpar minha fila</button><span class="note" id="sd_m"></span></div>
+   <div id="sd_q"></div></div>
+  <div class="card"><h2>Minha agenda de reuniões</h2>
+   <div class="note" id="cal_info"></div>
+   <div id="cal_form"><label for="cal_id">ID da minha agenda do Google</label><input id="cal_id" maxlength="200" placeholder="seu-email@gmail.com ou xxxx@group.calendar.google.com">
+    <div class="note">Na agenda: Configurações → <b>Compartilhar com pessoas específicas</b> → adicione <b id="cal_sa"></b> com permissão <b>Fazer alterações em eventos</b>. Quando a IA agendar uma reunião para os seus contatos, o evento entra nesta agenda. Dias, horários e duração seguem a configuração do administrador.</div>
+    <div class="row" style="align-items:center"><button id="cal_save">Salvar</button><button class="g" id="cal_test">Testar</button><span class="note" id="cal_m"></span></div></div></div>
+ </div></div>
  <div class="pane hide" id="p_board"><div class="lf" style="grid-template-columns:2fr 1fr"><input id="kb_q" placeholder="Buscar nome, telefone ou empresa" style="grid-column:auto"><select id="kb_t"><option value="">Todas as etiquetas</option></select></div><div class="note" style="padding:0 12px">Arraste os cartões entre as colunas para mudar a etapa. "Com a equipe" envia à fila; "Descartado" coloca o contato na lista de supressão.</div><div class="kb" id="kb"></div></div>
  <div class="pane hide" id="p_hist"><div class="wrap">
   <div class="card"><h2>Histórico da equipe</h2><div class="note">Quem fez o quê nos seus números e na sua equipe (suas ações e as dos seus atendentes), incluindo a leitura de conversas. O texto das mensagens não é guardado aqui.</div>
@@ -99,27 +120,54 @@ table{width:100%;border-collapse:collapse}td,th{padding:7px 6px;border-bottom:1p
  </div></div>
 </div>
 
+
+<dialog id="sec"><h3 style="margin:0 0 6px">Segurança da conta</h3>
+ <div id="sec_off"><div class="note">Verificação em duas etapas: além da senha, o login pede um código de 6 dígitos do app autenticador (Google Authenticator, Microsoft Authenticator, Authy…).</div>
+  <button id="sec_go" style="margin-top:8px">Ligar verificação em duas etapas</button></div>
+ <div id="sec_set" class="hide"><div class="note">1) No app autenticador, escolha «inserir chave de configuração» e digite a chave abaixo (ou abra o endereço no celular).</div>
+  <div style="font:600 16px ui-monospace,monospace;margin:6px 0;word-break:break-all" id="sec_key"></div><a id="sec_uri" href="#" class="note">abrir no app autenticador</a>
+  <div class="note" style="margin-top:8px">2) Digite o código de 6 dígitos que o app mostra:</div><input id="sec_cd" inputmode="numeric" autocomplete="one-time-code" maxlength="6" style="width:140px">
+  <button id="sec_ok" style="margin-left:6px">Confirmar</button></div>
+ <div id="sec_rec" class="hide"><div class="note"><b>Guarde estes códigos de recuperação</b> (cada um vale uma vez; servem se você perder o celular). Eles não aparecem de novo:</div>
+  <pre id="sec_codes" style="background:var(--bg);padding:8px;border-radius:8px"></pre></div>
+ <div id="sec_on" class="hide"><div class="note">✅ A verificação em duas etapas está <b>ligada</b>. Para desligar, confirme a senha e um código do app (ou de recuperação).</div>
+  <input id="sec_pw" type="password" placeholder="Sua senha" autocomplete="current-password" style="margin-top:6px"><input id="sec_dc" placeholder="Código" style="margin-top:6px">
+  <button class="g" id="sec_off_b" style="margin-top:6px">Desligar</button></div>
+ <div class="err" id="sec_err" role="alert" style="min-height:18px"></div>
+ <div style="text-align:right"><button class="g" id="sec_x">Fechar</button></div></dialog>
 <script>
 const $=id=>document.getElementById(id),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let TK=null;try{TK=localStorage.getItem("mtok")}catch(e){}
-let ME=null,LEADS=[],cur=null,tab="chats",lastSig="";
+let RO=false,ME=null,LEADS=[],cur=null,tab="chats",lastSig="";
 async function api(p,body,method){const r=await fetch(p,{method:method||(body?"POST":"GET"),headers:{"X-Token":TK||"","Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
  if(r.status==401&&TK){bye();throw new Error("sessão")}
  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail||"Erro");return j}
 function bye(){TK=null;try{localStorage.removeItem("mtok")}catch(e){}ME=null;$("app").classList.add("hide");$("login").classList.remove("hide")}
 const fail=e=>{if(e.message!="sessão")alert(e.message)};
+
+// verificação em duas etapas
+const SECP="/api/gestor";
+function secView(on,step){["sec_off","sec_set","sec_rec","sec_on"].forEach(i=>$(i).classList.add("hide"));$(step||(on?"sec_on":"sec_off")).classList.remove("hide");$("sec_err").textContent=""}
+async function secOpen(){let on=false;try{on=!!(await api(SECP+"/me")).manager.twofa}catch(e){}secView(on);$("sec").showModal()}
+$("secb").onclick=secOpen;$("sec_x").onclick=()=>$("sec").close();
+$("sec_go").onclick=async()=>{try{const r=await api(SECP+"/2fa/setup",{});$("sec_key").textContent=r.secret;$("sec_uri").href=r.uri;$("sec_cd").value="";secView(false,"sec_set")}catch(e){$("sec_err").textContent=e.message}};
+$("sec_ok").onclick=async()=>{try{const r=await api(SECP+"/2fa/enable",{code:$("sec_cd").value});$("sec_codes").textContent=r.recovery.join("\n");secView(true,"sec_rec")}catch(e){$("sec_err").textContent=e.message}};
+$("sec_off_b").onclick=async()=>{try{await api(SECP+"/2fa/disable",{password:$("sec_pw").value,code:$("sec_dc").value});$("sec_pw").value=$("sec_dc").value="";secView(false)}catch(e){$("sec_err").textContent=e.message}};
 $("lf").onsubmit=async e=>{e.preventDefault();$("lerr").textContent="";$("lbtn").disabled=true;
- try{const r=await fetch("/api/gestor/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({login:$("lg").value,password:$("pw").value})});const j=await r.json().catch(()=>({}));
-  if(!r.ok)throw new Error(j.detail||"Não foi possível entrar");TK=j.token;try{localStorage.setItem("mtok",TK)}catch(e){}$("pw").value="";start()}
+ try{const r=await fetch("/api/gestor/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({login:$("lg").value,password:$("pw").value,code:$("cd").value})});const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(j.detail||"Não foi possível entrar");
+  if(j.need_code){$("cdw").classList.remove("hide");$("cd").focus();$("lerr").textContent="Digite o código de 6 dígitos do app autenticador (ou um código de recuperação).";return}
+  TK=j.token;$("cd").value="";$("cdw").classList.add("hide");try{localStorage.setItem("mtok",TK)}catch(e){}$("pw").value="";start()}
  catch(x){$("lerr").textContent=x.message}finally{$("lbtn").disabled=false}};
 $("out").onclick=async()=>{await pushDrop();try{await api("/api/gestor/logout",{})}catch(e){}bye()};
-document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x==b));["chats","wa","team","board","perf","hist"].forEach(t=>$("p_"+t).classList.toggle("hide",t!=tab));refresh(true)});
+document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x==b));["chats","wa","team","send","board","perf","hist"].forEach(t=>$("p_"+t).classList.toggle("hide",t!=tab));refresh(true)});
 
 async function start(){$("login").classList.add("hide");$("app").classList.remove("hide");await refresh(true);setInterval(()=>refresh(),3000)}
 async function refresh(force){try{ME=await api("/api/gestor/me");
- $("who").textContent=ME.manager.name;$("sub").textContent=`${ME.lines.length}/${ME.manager.max_lines} número(s) · ${ME.agents.length}/${ME.manager.max_agents} atendente(s) · ${ME.queue} na fila`;
+ RO=ME.manager.role=="supervisor";document.body.classList.toggle("ro",RO);
+ $("who").textContent=ME.manager.name+(RO?" · supervisor":"");$("sub").textContent=RO?`somente leitura · ${ME.lines.length} número(s) · ${ME.agents.length} atendente(s) · ${ME.queue} na fila`:`${ME.lines.length}/${ME.manager.max_lines} número(s) · ${ME.agents.length}/${ME.manager.max_agents} atendente(s) · ${ME.queue} na fila`;
  $("blk").classList.toggle("hide",!ME.blocked);
- if(tab=="chats")await chats(force);else if(tab=="wa")await wa(force);else if(tab=="team")team();else if(tab=="hist")hist(force);else if(tab=="board")board(force);else perf(force)}catch(e){}}
+ if(tab=="chats")await chats(force);else if(tab=="wa")await wa(force);else if(tab=="team")team();else if(tab=="hist")hist(force);else if(tab=="board")board(force);else if(tab=="send")send(force);else perf(force)}catch(e){}}
 
 // ---- conversas
 const stTxt=L=>L.human?(L.agent_id==-1?"com você":L.agent_id?"com "+(L.agent_name||"atendente"):"na fila da equipe"):"IA atendendo";
@@ -173,6 +221,31 @@ function team(){$("turl").textContent=location.origin+"/atendente";$("tqn").text
 $("aadd").onclick=async()=>{$("amsg").textContent="";try{const r=await api("/api/gestor/agents",{name:$("an").value,login:$("al").value,password:$("ap").value,max_chats:parseInt($("am").value)||5});
  $("amsg").textContent=`Criado. Usuário: ${r.login} · Senha: ${r.password} (anote agora, ela não aparece de novo).`;["an","al","ap"].forEach(i=>$(i).value="");refresh(true)}catch(e){$("amsg").textContent=e.message}};
 
+
+// ---- disparo e agenda
+let SDN=[];
+async function send(force){if(!force&&window._sd)return;window._sd=1;
+ try{const n=await api("/api/gestor/niches");SDN=n.niches;const k=$("sd_n").value;$("sd_n").innerHTML=SDN.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("");$("sd_n").value=k||n.default;sdOpen();
+  $("sd_l").innerHTML=ME.lines.map(l=>`<option value="${esc(l.id)}">${esc(l.label||l.id)}</option>`).join("")||'<option value="">Conecte um número na aba Meu WhatsApp</option>';
+  const c=await api("/api/gestor/calendar");$("cal_sa").textContent=c.sa_email||"(o administrador ainda não configurou)";$("cal_id").value=c.calendar_id;
+  $("cal_info").textContent=c.available?(c.calendar_id?"Usando a sua agenda.":"Sem agenda própria: as reuniões vão para a agenda do administrador."):"O administrador ainda não ativou a integração com o Google Agenda; por enquanto a reunião só fica registrada na conversa.";
+  $("cal_form").classList.toggle("hide",!c.available);sdQueue()}catch(e){}}
+function sdOpen(){const x=SDN.find(a=>a.id==$("sd_n").value);$("sd_open").textContent=x?"Primeira mensagem: "+(x.outbound_text||"").slice(0,300):""}
+$("sd_n").onchange=sdOpen;
+async function sdQueue(){try{const d=await api("/api/gestor/outbox");$("sq").textContent=d.queued?d.queued+" na fila":"";
+ $("sd_q").innerHTML=d.rows.length?'<table><thead><tr><th>Contato</th><th>Situação</th><th>Quando</th></tr></thead><tbody>'+d.rows.slice(0,20).map(r=>`<tr><td>${esc(r.name||r.phone)}</td><td>${esc({queued:"na fila",sent:"enviado",failed:"falhou",skipped:"pulado"}[r.status]||r.status)}${r.error?" · "+esc(r.error):""}</td><td>${r.sent_at?new Date(r.sent_at*1e3).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):""}</td></tr>`).join("")+"</tbody></table>":""}catch(e){}}
+$("sd_up").onclick=()=>$("sd_f").click();
+$("sd_f").onchange=async()=>{const f=$("sd_f").files[0];$("sd_f").value="";if(!f)return;if(f.size>5e6){$("sd_res").textContent="Arquivo maior que 5 MB";return}$("sd_res").textContent="Lendo a planilha…";
+ try{const data=await new Promise((ok,er)=>{const r=new FileReader();r.onload=()=>ok(r.result.split(",")[1]);r.onerror=er;r.readAsDataURL(f)});
+  const r=await api("/api/gestor/contacts/parse",{filename:f.name,data});$("sd_t").value=r.lines;
+  $("sd_res").textContent=`${r.valid} contato(s) pronto(s) de ${r.total} linha(s)`+(r.issue_count?` · ${r.issue_count} com observação (ex.: ${r.issues[0].value}: ${r.issues[0].reason})`:"")}catch(e){$("sd_res").textContent=e.message}};
+$("sd_go").onclick=async()=>{$("sd_m").textContent="";try{const r=await api("/api/gestor/dispatch",{niche_id:+$("sd_n").value,lines:$("sd_t").value,consent:$("sd_c").checked,origem:$("sd_o").value,line:$("sd_l").value});
+ $("sd_m").textContent=`${r.queued} na fila`+(r.suppressed?` · ${r.suppressed} pulado(s) por terem pedido SAIR`:"");$("sd_t").value="";$("sd_c").checked=false;sdQueue()}catch(e){$("sd_m").textContent=e.message}};
+$("sd_clr").onclick=async()=>{if(!confirm("Tirar da fila os contatos que ainda não foram enviados?"))return;try{const r=await api("/api/gestor/outbox/clear",{});$("sd_m").textContent=r.removed+" removido(s) da fila";sdQueue()}catch(e){$("sd_m").textContent=e.message}};
+$("cal_save").onclick=async()=>{try{await api("/api/gestor/calendar",{calendar_id:$("cal_id").value},"PUT");$("cal_m").textContent="Salvo";send(true)}catch(e){$("cal_m").textContent=e.message}};
+$("cal_test").onclick=async()=>{$("cal_m").textContent="Testando…";try{const r=await api("/api/gestor/calendar/test",{});$("cal_m").textContent=r.ok?`Conectou em «${r.calendar}». Horários livres: ${r.slots.join(", ")||"nenhum no período"}`:r.error}catch(e){$("cal_m").textContent=e.message}};
+setInterval(()=>{if(tab=="send"&&document.activeElement.tagName!="TEXTAREA")sdQueue()},5000);
+
 // ---- desempenho
 const fmt=s=>s==null?"—":s<90?s+" s":s<5400?Math.round(s/60)+" min":(s/3600).toFixed(1)+" h";
 async function perf(force){if(!force&&window._pf)return;window._pf=1;try{const d=await api("/api/gestor/metrics?days="+$("pd").value);
@@ -198,7 +271,7 @@ async function board(force){const d=await api("/api/gestor/leads");LEADS=d.leads
  let dragP=null;
  $("kb").querySelectorAll(".kcard").forEach(c=>{c.ondragstart=e=>{dragP=c.dataset.p;c.classList.add("drag");e.dataTransfer.setData("text/plain",dragP)};c.ondragend=()=>c.classList.remove("drag");c.onclick=()=>{cur=c.dataset.p;document.querySelector('#tabs button[data-t="chats"]').click()}});
  $("kb").querySelectorAll(".kcol").forEach(col=>{col.ondragover=e=>{e.preventDefault();col.classList.add("over")};col.ondragleave=()=>col.classList.remove("over");
-  col.ondrop=async e=>{e.preventDefault();col.classList.remove("over");const p=dragP||e.dataTransfer.getData("text/plain"),st=col.dataset.s,l=LEADS.find(x=>x.phone==p);if(!l||l.stage==st)return;
+  col.ondrop=async e=>{e.preventDefault();col.classList.remove("over");const p=dragP||e.dataTransfer.getData("text/plain"),st=col.dataset.s,l=LEADS.find(x=>x.phone==p);if(RO||!l||l.stage==st)return;
    if(st=="descartado"&&!confirm("Descartar este lead? O contato entra na lista de supressão e nunca mais recebe mensagem."))return;
    if(st=="humano"&&!confirm("Enviar esta conversa à equipe?"))return;
    if(l.human&&st!="humano"&&!confirm("Esta conversa está com a equipe. Mover para fora de 'Com a equipe' devolve a conversa à IA. Continuar?"))return;

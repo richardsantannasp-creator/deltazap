@@ -57,6 +57,18 @@ O agente consulta horários livres e cria o evento de verdade em uma agenda do G
 ## Gestor de equipe (acesso próprio, número próprio, equipe própria)
 O administrador cria gestores em **Avisos > Gestores de equipe** (limites de números e de atendentes por gestor). O gestor entra em `/gestor`, conecta o WhatsApp dele, cria os atendentes dele e atende as conversas dos números dele, sem ver nada de outros. Transferências em números do gestor só vão para a equipe dele, e os números dos gestores nunca entram nos disparos do administrador. Detalhes em `GESTOR.md`.
 
+## Etiquetas, quadro (kanban) e filtros
+Etiquetas coloridas por lead (já vêm Quente, Morno, Frio, Cliente e Retornar; você cria, renomeia e apaga) e uma aba **Quadro** com uma coluna por etapa do funil: arraste o cartão para mudar de etapa. Mover para **Com a equipe** abre a transferência; sair dela devolve a conversa à IA; **Descartado** pede confirmação e coloca o contato na lista de supressão. Conversas têm busca por nome, telefone e empresa e filtros por etapa e etiqueta, no painel, no atendente e no gestor.
+
+## Histórico de ações (auditoria)
+Registra quem fez o quê, quando e de qual endereço: logins (inclusive recusados), alterações de configuração, equipe, disparos, envio e leitura de conversas, exportações e exclusões de dados. **Não guarda o texto das mensagens.** Aba **Avisos > Histórico de ações** (filtros e CSV); o gestor vê só o dele e o da equipe dele. Retenção de 365 dias (`AUDIT_KEEP_DAYS`); telefones são anonimizados quando um titular pede exclusão (LGPD).
+
+## Roteiros (menu de opções) e resposta fora do horário
+Em **Avisos > Roteiros e respostas automáticas**: mensagens que rodam **antes da IA**. Gatilhos: primeira mensagem do contato, palavra-chave ou fora do horário da equipe (com `{horario}` e `{volta}`). Opções numeradas podem responder um texto, chamar a equipe, mudar de nicho, colocar etiqueta ou seguir com a IA. Se o contato escreve algo que não é uma opção, a IA conversa normalmente. O aviso fora do horário não repete antes de 12 h.
+
+## Supervisor, verificação em duas etapas, disparo e agenda do gestor
+Detalhes em `GESTOR.md`: perfil de supervisor somente leitura, 2FA por aplicativo autenticador com códigos de recuperação, disparo do gestor pelos números dele (com consentimento) e agenda do Google por gestor.
+
 ## App no celular
 Atendentes e gestores instalam o painel na tela inicial (PWA) e recebem **avisos** de nova conversa, fila e resposta do lead, sem texto da mensagem na tela bloqueada. Guia em `APP-CELULAR.md`.
 

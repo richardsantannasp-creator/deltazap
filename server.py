@@ -437,6 +437,7 @@ async def personalized_opening(niche, name, company, context, fallback):
     return txt
 
 async def run_agent(phone):
+    GCAL_CAL.set(mgr_calendar(phone))
     lead = get_lead(phone)
     niche = get_niche(lead["niche_id"]) or get_niche(default_niche_id())
     system = build_system(lead, niche)
@@ -3831,7 +3832,7 @@ def agent_public(a, now=None):
     online = bool(a["active"] and a["available"] and now - (a["last_seen"] or 0) < ONLINE_S)
     return {"id": a["id"], "login": a["login"], "name": a["name"], "active": bool(a["active"]), "available": bool(a["available"]),
             "online": online, "present": bool(now - (a["last_seen"] or 0) < ONLINE_S), "max_chats": a["max_chats"], "load": agent_load(a["id"]),
-            "manager_id": a.get("manager_id") or 0}
+            "manager_id": a.get("manager_id") or 0, "twofa": bool(a.get("totp_on"))}
 
 def assign_next(phone, exclude=()):
     """Entrega a conversa ao atendente disponível com menos conversas (empate: quem recebeu há mais tempo). None = ninguém disponível."""
@@ -3925,6 +3926,18 @@ def migrate_v13():
             c.execute("ALTER TABLE leads ADD COLUMN meeting_event TEXT")
 migrate_v13()
 
+import contextvars
+GCAL_CAL = contextvars.ContextVar("gcal_cal", default="")      # agenda própria do gestor dono da conversa (vale só dentro do atendimento daquele lead)
+
+def mgr_calendar(phone):
+    """ID da agenda do gestor dono do lead ("" = usa a agenda do administrador)."""
+    mid = lead_manager(phone) if phone else 0
+    if not mid:
+        return ""
+    with conn() as c:
+        r = c.execute("SELECT calendar_id FROM managers WHERE id=?", (mid,)).fetchone()
+    return (r["calendar_id"] or "").strip() if r and r["calendar_id"] else ""
+
 def gcal_cfg():
     cfg = dict(GCAL_DEFAULT)
     cfg["calendar_id"] = os.getenv("GOOGLE_CALENDAR_ID", "").strip()
@@ -3932,6 +3945,8 @@ def gcal_cfg():
         cfg.update(json.loads(get_setting("gcal") or "{}"))
     except ValueError:
         pass
+    if GCAL_CAL.get():
+        cfg["calendar_id"] = GCAL_CAL.get()
     cfg["days"] = _clean_days(cfg.get("days"))
     for k, lo, hi in (("duration_min", 10, 480), ("notice_min", 0, 14 * 1440), ("horizon_days", 1, 60), ("step_min", 10, 240)):
         try:
@@ -4412,6 +4427,7 @@ async def agents_metrics(days: int = 30):
 class AgentLoginIn(BaseModel):
     login: str
     password: str
+    code: str = ""
 
 @app.post("/api/agent/login")
 async def agent_login(b: AgentLoginIn):
@@ -4426,6 +4442,13 @@ async def agent_login(b: AgentLoginIn):
         LOGIN_FAILS[lg] = fails + [now]
         audit_add("atendente", 0, lg, "Tentativa de login recusada", lg, 401)
         raise HTTPException(401, "Usuário ou senha incorretos")
+    if a["totp_on"]:
+        if not (b.code or "").strip():
+            return {"need_code": True}
+        if not twofa_verify("agents", dict(a), b.code):
+            LOGIN_FAILS[lg] = fails + [now]
+            audit_add("atendente", a["id"], a["name"], "Código de verificação recusado", lg, 401)
+            raise HTTPException(401, "Código de verificação incorreto")
     LOGIN_FAILS.pop(lg, None)
     tok = secrets.token_urlsafe(32)
     with conn() as c:
@@ -5774,7 +5797,7 @@ async def eval_del(rid: int):
 def mtok_hash(t):
     return hashlib.sha256(("mgr:" + t).encode()).hexdigest()
 
-def manager_from_token(tok):
+def manager_from_token(tok, write=False):
     if not tok:
         raise HTTPException(401, "sessão inválida")
     now = time.time()
@@ -5783,10 +5806,16 @@ def manager_from_token(tok):
         if not r:
             raise HTTPException(401, "sessão inválida ou vencida: entre de novo")
         c.execute("UPDATE managers SET last_seen=? WHERE id=?", (now, r["id"]))
+    if write and r["role"] == "supervisor":
+        raise HTTPException(403, "O perfil de supervisor é somente leitura")
     return dict(r)
 
+def mgr_sup(m):
+    return (m.get("role") or "gestor") == "supervisor"
+
 def manager_public(m):
-    return {"id": m["id"], "login": m["login"], "name": m["name"], "active": bool(m["active"]), "max_lines": m["max_lines"], "max_agents": m["max_agents"]}
+    return {"id": m["id"], "login": m["login"], "name": m["name"], "active": bool(m["active"]), "max_lines": m["max_lines"], "max_agents": m["max_agents"],
+            "role": m.get("role") or "gestor", "twofa": bool(m.get("totp_on")), "calendar_id": m.get("calendar_id") or ""}
 
 def mgr_line_ids(mid):
     with conn() as c:
@@ -5805,7 +5834,7 @@ def mgr_own_agent(m, aid):
 
 def mgr_own_lead(m, phone):
     lead = get_lead(phone)
-    if not lead or lead_manager(phone) != m["id"]:
+    if not lead or (lead_manager(phone) != m["id"] and not mgr_sup(m)):
         raise HTTPException(404, "Conversa não encontrada")
     return lead
 
@@ -5816,6 +5845,7 @@ class ManagerIn(BaseModel):
     max_lines: int = 1
     max_agents: int = 10
     active: bool = True
+    role: str = "gestor"
 
 # ---- cadastro pelo administrador ----
 @app.get("/api/managers", dependencies=[Depends(auth)])
@@ -5839,8 +5869,8 @@ async def managers_add(b: ManagerIn):
         raise HTTPException(400, "A senha do gestor precisa ter pelo menos 8 caracteres")
     try:
         with conn() as c:
-            c.execute("INSERT INTO managers(login,name,pw,max_lines,max_agents,created) VALUES(?,?,?,?,?,?)",
-                      (lg, name, pw_hash(pw), max(1, min(LINES_MAX, b.max_lines)), max(1, min(100, b.max_agents)), time.time()))
+            c.execute("INSERT INTO managers(login,name,pw,max_lines,max_agents,created,role) VALUES(?,?,?,?,?,?,?)",
+                      (lg, name, pw_hash(pw), max(1, min(LINES_MAX, b.max_lines)), max(1, min(100, b.max_agents)), time.time(), "supervisor" if b.role == "supervisor" else "gestor"))
     except sqlite3.IntegrityError:
         raise HTTPException(400, "Já existe um gestor com este usuário")
     log("humano", f"gestor {name} criado")
@@ -5895,6 +5925,13 @@ async def gestor_login(b: AgentLoginIn):
         LOGIN_FAILS[key] = fails + [now]
         audit_add("gestor", 0, lg, "Tentativa de login recusada", lg, 401)
         raise HTTPException(401, "Usuário ou senha incorretos")
+    if m["totp_on"]:
+        if not (b.code or "").strip():
+            return {"need_code": True}
+        if not twofa_verify("managers", dict(m), b.code):
+            LOGIN_FAILS[key] = fails + [now]
+            audit_add(m["role"] or "gestor", m["id"], m["name"], "Código de verificação recusado", lg, 401)
+            raise HTTPException(401, "Código de verificação incorreto")
     LOGIN_FAILS.pop(key, None)
     tok = secrets.token_urlsafe(32)
     with conn() as c:
@@ -5916,20 +5953,21 @@ async def gestor_logout(x_token: str = Header(default="")):
 async def gestor_me(x_token: str = Header(default="")):
     m = manager_from_token(x_token)
     await refresh_lines_state()
+    sup = mgr_sup(m)
     mine = set(mgr_line_ids(m["id"]))
-    lines = [l for l in line_summary() if l["id"] in mine]
+    lines = [l for l in line_summary() if sup or l["id"] in mine]
     now = time.time()
     with conn() as c:
-        ags = [dict(r) for r in c.execute("SELECT * FROM agents WHERE manager_id=? ORDER BY name", (m["id"],))]
+        ags = [dict(r) for r in (c.execute("SELECT * FROM agents ORDER BY name") if sup else c.execute("SELECT * FROM agents WHERE manager_id=? ORDER BY name", (m["id"],)))]
     return {"manager": manager_public(m), "provider": PROVIDER, "lines": lines, "agents": [agent_public(a, now) for a in ags],
-            "queue": len(queue_rows(m["id"])), "blocked": qr_blocked(), "hours": hours_status()}
+            "queue": len(queue_rows(None if sup else m["id"])), "blocked": qr_blocked(), "hours": hours_status()}
 
 class MgrLineIn(BaseModel):
     label: str = ""
 
 @app.post("/api/gestor/lines")
 async def gestor_line_add(b: MgrLineIn, x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     if len(mgr_line_ids(m["id"])) >= m["max_lines"]:
         raise HTTPException(400, f"Seu acesso permite {m['max_lines']} número(s) de WhatsApp. Peça ao administrador para ampliar.")
     r = await lines_add({"label": b.label})
@@ -5940,13 +5978,13 @@ async def gestor_line_add(b: MgrLineIn, x_token: str = Header(default="")):
 
 @app.put("/api/gestor/lines/{line_id}")
 async def gestor_line_put(line_id: str, b: MgrLineIn, x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     mgr_own_line(m, line_id)
     return await lines_put(line_id, {"label": b.label})
 
 @app.delete("/api/gestor/lines/{line_id}")
 async def gestor_line_del(line_id: str, x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     mgr_own_line(m, line_id)
     return await lines_delete(line_id)
 
@@ -5958,19 +5996,19 @@ async def gestor_connection(line: str = "", x_token: str = Header(default="")):
 
 @app.post("/api/gestor/pair")
 async def gestor_pair(b: PairIn, line: str = "", x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     mgr_own_line(m, line)
     return await connection_pair(b, line)
 
 @app.post("/api/gestor/line-logout")
 async def gestor_line_logout(line: str = "", x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     mgr_own_line(m, line)
     return await connection_logout(line)
 
 @app.post("/api/gestor/agents")
 async def gestor_agent_add(b: AgentIn, x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     with conn() as c:
         n = c.execute("SELECT COUNT(*) n FROM agents WHERE manager_id=?", (m["id"],)).fetchone()["n"]
     if n >= m["max_agents"]:
@@ -5979,34 +6017,36 @@ async def gestor_agent_add(b: AgentIn, x_token: str = Header(default="")):
 
 @app.put("/api/gestor/agents/{aid}")
 async def gestor_agent_put(aid: int, b: AgentIn, x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     mgr_own_agent(m, aid)
     return await agents_edit(aid, b)
 
 @app.delete("/api/gestor/agents/{aid}")
 async def gestor_agent_del(aid: int, x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     mgr_own_agent(m, aid)
     return await agents_del(aid)
 
 @app.get("/api/gestor/metrics")
 async def gestor_metrics(days: int = 30, x_token: str = Header(default="")):
     m = manager_from_token(x_token)
-    return {"days": days, "agents": agent_metrics(days, m["id"])}
+    return {"days": days, "agents": agent_metrics(days, None if mgr_sup(m) else m["id"])}
 
 @app.get("/api/gestor/leads")
 async def gestor_leads(x_token: str = Header(default="")):
     m = manager_from_token(x_token)
-    ids = mgr_line_ids(m["id"])
-    if not ids:
+    sup = mgr_sup(m)
+    ids = [] if sup else mgr_line_ids(m["id"])
+    if not ids and not sup:
         return {"leads": []}
     ph = ",".join("?" * len(ids))
+    flt = "1=1" if sup else f"l.line IN ({ph})"
     with conn() as c:
         rows = c.execute(f"""SELECT l.phone,l.line,l.name,l.company,l.stage,l.human,l.agent_id,l.outcome,l.origin,l.handoff_reason,l.bant,l.meeting,a.name AS agent_name,
             (SELECT text FROM messages m WHERE m.phone=l.phone ORDER BY id DESC LIMIT 1) AS last_text,
             (SELECT ts FROM messages m WHERE m.phone=l.phone ORDER BY id DESC LIMIT 1) AS last_ts
             FROM leads l LEFT JOIN agents a ON a.id=l.agent_id
-            WHERE l.test=0 AND l.line IN ({ph}) ORDER BY COALESCE(last_ts,l.created) DESC LIMIT 300""", ids).fetchall()
+            WHERE l.test=0 AND {flt} ORDER BY COALESCE(last_ts,l.created) DESC LIMIT 300""", ids).fetchall()
     tg = lead_tag_map()
     return {"leads": [{**dict(r), "tags": tg.get(r["phone"], [])} for r in rows], "tags": tag_list(), "stages": STAGES}
 
@@ -6020,7 +6060,7 @@ async def gestor_messages(phone: str, x_token: str = Header(default="")):
 
 @app.post("/api/gestor/handoff/{phone}")
 async def gestor_handoff(phone: str, x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     mgr_own_lead(m, phone)
     handoff_begin(phone, f"enviada à equipe pelo gestor {m['name']}", "gestor")
     await handoff_sweep()
@@ -6028,13 +6068,13 @@ async def gestor_handoff(phone: str, x_token: str = Header(default="")):
 
 @app.post("/api/gestor/takeover/{phone}")
 async def gestor_takeover(phone: str, b: TakeIn, x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     mgr_own_lead(m, phone)
     return await takeover(phone, b)
 
 @app.post("/api/gestor/send/{phone}")
 async def gestor_send(phone: str, b: TextIn, x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     mgr_own_lead(m, phone)
     t = (b.text or "").strip()
     if not t:
@@ -6298,7 +6338,11 @@ AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale;
     ("POST", r"^/api/agent/notes/(\d+)$", "Anotou no lead"), ("POST", r"^/api/agent/send/(\d+)$", "Respondeu o lead"), ("POST", r"^/api/agent/claim/(\d+)$", "Assumiu a conversa"),
     ("POST", r"^/api/agent/release/(\d+)$", "Devolveu a conversa à IA"), ("POST", r"^/api/agent/transfer/(\d+)$", "Transferiu a conversa"), ("POST", r"^/api/agent/outcome/(\d+)$", "Definiu resultado do lead"),
     ("POST", r"^/api/agent/leads/(\d+)/tags$", "Alterou etiquetas do lead"), ("PUT", r"^/api/agent/leads/(\d+)/tags$", "Alterou etiquetas do lead"),
-    ("POST", r"^/api/(agent|gestor)/2fa/(setup|enable|disable)$", "Verificação em duas etapas: \\2"),
+    ("POST", r"^/api/gestor/outbox/clear$", "Limpou a fila de disparo"), ("POST", r"^/api/gestor/contacts/parse$", "Leu planilha de contatos"),
+    ("POST", r"^/api/gestor/calendar/test$", "Testou a agenda de reuniões"),
+    ("POST", r"^/api/(agent|gestor)/2fa/setup$", "Começou a ligar a verificação em duas etapas"), ("POST", r"^/api/(agent|gestor)/2fa/enable$", "Ligou a verificação em duas etapas"),
+    ("POST", r"^/api/(agent|gestor)/2fa/disable$", "Desligou a verificação em duas etapas"),
+    ("POST", r"^/api/agents/(\d+)/2fa-reset$", "Liberou a verificação em duas etapas do atendente"), ("POST", r"^/api/managers/(\d+)/2fa-reset$", "Liberou a verificação em duas etapas do gestor"),
     ("POST", r"^/api/gestor/lines$", "Adicionou número de WhatsApp"), ("PUT", r"^/api/gestor/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/gestor/lines/([\w-]+)$", "Removeu número de WhatsApp"),
     ("POST", r"^/api/gestor/pair$", "Gerou código de conexão do WhatsApp"), ("POST", r"^/api/gestor/line-logout$", "Desconectou o WhatsApp"),
     ("POST", r"^/api/gestor/agents$", "Criou atendente"), ("PUT", r"^/api/gestor/agents/(\d+)$", "Alterou atendente"), ("DELETE", r"^/api/gestor/agents/(\d+)$", "Excluiu atendente"),
@@ -6418,7 +6462,7 @@ def mgr_audit_scope(m):
 @app.get("/api/gestor/audit")
 async def gestor_audit(days: int = 30, q: str = "", x_token: str = Header(default="")):
     m = manager_from_token(x_token)
-    return {"rows": audit_rows(days, "", q, 300, mgr_audit_scope(m))}
+    return {"rows": audit_rows(days, "", q, 300, None if mgr_sup(m) else mgr_audit_scope(m))}
 
 # ======================================================================
 # v18: etiquetas, filtros e quadro (kanban) por etapa
@@ -6557,13 +6601,13 @@ async def agent_lead_tags(phone: str, b: LeadTagsIn, x_token: str = Header(defau
 
 @app.put("/api/gestor/leads/{phone}/tags")
 async def gestor_lead_tags(phone: str, b: LeadTagsIn, x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     mgr_own_lead(m, phone)
     return {"ok": True, "tags": set_lead_tags(phone, b.tags)}
 
 @app.post("/api/gestor/leads/{phone}/stage")
 async def gestor_lead_stage(phone: str, b: StageIn, x_token: str = Header(default="")):
-    m = manager_from_token(x_token)
+    m = manager_from_token(x_token, write=True)
     mgr_own_lead(m, phone)
     r = move_stage(phone, b.stage)
     if r.get("handoff"):
@@ -6752,3 +6796,253 @@ async def flows_del(fid: int):
         c.execute("DELETE FROM flows WHERE id=?", (fid,))
         c.execute("UPDATE leads SET flow_step=NULL WHERE flow_step LIKE ?", ('%"id": ' + str(int(fid)) + '}',))
     return {"ok": True}
+
+
+# ======================================================================
+# v20: verificação em duas etapas (TOTP, RFC 6238) para atendentes, gestores e supervisores
+# ======================================================================
+def migrate_v20():
+    with conn() as c:
+        for tbl in ("agents", "managers"):
+            cols = {r[1] for r in c.execute(f"PRAGMA table_info({tbl})")}
+            for col, ddl in (("totp_secret", "TEXT"), ("totp_on", "INTEGER DEFAULT 0"), ("totp_last", "INTEGER DEFAULT 0"), ("totp_rec", "TEXT")):
+                if col not in cols:
+                    c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {ddl}")
+migrate_v20()
+
+def migrate_v21():
+    with conn() as c:
+        if "calendar_id" not in {r["name"] for r in c.execute("PRAGMA table_info(managers)")}:
+            c.execute("ALTER TABLE managers ADD COLUMN calendar_id TEXT DEFAULT ''")
+migrate_v21()
+
+TOTP_ISSUER = "SDR WhatsApp"
+
+def totp_new_secret():
+    return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+
+def totp_at(secret, counter, digits=6):
+    key = base64.b32decode(secret + "=" * (-len(secret) % 8), casefold=True)
+    h = hmac.new(key, counter.to_bytes(8, "big"), hashlib.sha1).digest()
+    o = h[-1] & 15
+    return str((int.from_bytes(h[o:o + 4], "big") & 0x7FFFFFFF) % 10 ** digits).zfill(digits)
+
+def totp_check(secret, code, last=0, now=None):
+    """Aceita o código atual e o vizinho (relógio um pouco fora). Devolve o contador usado, ou 0. Um contador já usado não vale de novo."""
+    code = re.sub(r"\D", "", code or "")
+    if len(code) != 6:
+        return 0
+    step = int((now if now is not None else time.time()) // 30)
+    for cnt in (step, step - 1, step + 1):
+        if cnt > (last or 0) and hmac.compare_digest(totp_at(secret, cnt), code):
+            return cnt
+    return 0
+
+def _rec_hash(code):
+    return hashlib.sha256(re.sub(r"[^a-z0-9]", "", (code or "").lower()).encode()).hexdigest()
+
+def twofa_make_recovery():
+    codes = [f"{secrets.token_hex(3)}-{secrets.token_hex(3)}" for _ in range(8)]
+    return codes, json.dumps([_rec_hash(x) for x in codes])
+
+def twofa_verify(table, row, code):
+    """Valida o código do app ou um código de recuperação (que é gasto)."""
+    if table not in ("agents", "managers"):
+        return False
+    if not row.get("totp_on") or not row.get("totp_secret"):
+        return False
+    cnt = totp_check(row["totp_secret"], code, row.get("totp_last") or 0)
+    if cnt:
+        with conn() as c:
+            c.execute(f"UPDATE {table} SET totp_last=? WHERE id=?", (cnt, row["id"]))
+        return True
+    h = _rec_hash(code)
+    try:
+        recs = json.loads(row.get("totp_rec") or "[]")
+    except ValueError:
+        recs = []
+    if len(re.sub(r"[^a-z0-9]", "", (code or "").lower())) == 12 and h in recs:
+        recs.remove(h)
+        with conn() as c:
+            c.execute(f"UPDATE {table} SET totp_rec=? WHERE id=?", (json.dumps(recs), row["id"]))
+        return True
+    return False
+
+class TwoFaIn(BaseModel):
+    code: str = ""
+    password: str = ""
+
+def _twofa_row(table, rid):
+    with conn() as c:
+        return dict(c.execute(f"SELECT * FROM {table} WHERE id=?", (rid,)).fetchone())
+
+def twofa_setup(table, row):
+    if row.get("totp_on"):
+        raise HTTPException(400, "A verificação em duas etapas já está ligada")
+    sec = totp_new_secret()
+    with conn() as c:
+        c.execute(f"UPDATE {table} SET totp_secret=?, totp_on=0, totp_last=0, totp_rec=NULL WHERE id=?", (sec, row["id"]))
+    from urllib.parse import quote
+    label = quote(f"{TOTP_ISSUER}:{row['login']}")
+    return {"secret": " ".join(sec[i:i + 4] for i in range(0, len(sec), 4)), "uri": f"otpauth://totp/{label}?secret={sec}&issuer={quote(TOTP_ISSUER)}&digits=6&period=30"}
+
+def twofa_enable(table, row, code):
+    row = _twofa_row(table, row["id"])
+    if row["totp_on"] or not row["totp_secret"]:
+        raise HTTPException(400, "Comece pela configuração (gerar a chave)")
+    cnt = totp_check(row["totp_secret"], code, 0)
+    if not cnt:
+        raise HTTPException(400, "Código incorreto. Confira a hora do celular e tente de novo")
+    codes, hashed = twofa_make_recovery()
+    with conn() as c:
+        c.execute(f"UPDATE {table} SET totp_on=1, totp_last=?, totp_rec=? WHERE id=?", (cnt, hashed, row["id"]))
+    return {"ok": True, "recovery": codes}
+
+def twofa_disable(table, row, b):
+    row = _twofa_row(table, row["id"])
+    if not row["totp_on"]:
+        raise HTTPException(400, "A verificação em duas etapas não está ligada")
+    if not pw_ok(b.password or "", row["pw"]) or not twofa_verify(table, row, b.code):
+        raise HTTPException(400, "Senha ou código incorretos")
+    with conn() as c:
+        c.execute(f"UPDATE {table} SET totp_on=0, totp_secret=NULL, totp_last=0, totp_rec=NULL WHERE id=?", (row["id"],))
+    return {"ok": True}
+
+@app.post("/api/agent/2fa/setup")
+async def agent_2fa_setup(x_token: str = Header(default="")):
+    return twofa_setup("agents", agent_from_token(x_token))
+
+@app.post("/api/agent/2fa/enable")
+async def agent_2fa_enable(b: TwoFaIn, x_token: str = Header(default="")):
+    return twofa_enable("agents", agent_from_token(x_token), b.code)
+
+@app.post("/api/agent/2fa/disable")
+async def agent_2fa_disable(b: TwoFaIn, x_token: str = Header(default="")):
+    return twofa_disable("agents", agent_from_token(x_token), b)
+
+@app.post("/api/gestor/2fa/setup")
+async def gestor_2fa_setup(x_token: str = Header(default="")):
+    return twofa_setup("managers", manager_from_token(x_token))
+
+@app.post("/api/gestor/2fa/enable")
+async def gestor_2fa_enable(b: TwoFaIn, x_token: str = Header(default="")):
+    return twofa_enable("managers", manager_from_token(x_token), b.code)
+
+@app.post("/api/gestor/2fa/disable")
+async def gestor_2fa_disable(b: TwoFaIn, x_token: str = Header(default="")):
+    return twofa_disable("managers", manager_from_token(x_token), b)
+
+@app.post("/api/agents/{aid}/2fa-reset", dependencies=[Depends(auth)])
+async def agent_2fa_reset(aid: int):
+    """Administrador libera quem perdeu o celular e os códigos de recuperação."""
+    with conn() as c:
+        if not c.execute("SELECT 1 FROM agents WHERE id=?", (aid,)).fetchone():
+            raise HTTPException(404, "Atendente não encontrado")
+        c.execute("UPDATE agents SET totp_on=0, totp_secret=NULL, totp_last=0, totp_rec=NULL WHERE id=?", (aid,))
+        c.execute("DELETE FROM agent_sessions WHERE agent_id=?", (aid,))
+    return {"ok": True}
+
+@app.post("/api/managers/{mid}/2fa-reset", dependencies=[Depends(auth)])
+async def manager_2fa_reset(mid: int):
+    with conn() as c:
+        if not c.execute("SELECT 1 FROM managers WHERE id=?", (mid,)).fetchone():
+            raise HTTPException(404, "Gestor não encontrado")
+        c.execute("UPDATE managers SET totp_on=0, totp_secret=NULL, totp_last=0, totp_rec=NULL WHERE id=?", (mid,))
+        c.execute("DELETE FROM manager_sessions WHERE manager_id=?", (mid,))
+    return {"ok": True}
+
+
+# ======================================================================
+# v21: o gestor dispara para os contatos dele e usa a própria agenda
+# ======================================================================
+class MgrCalIn(BaseModel):
+    calendar_id: str = ""
+
+def _mgr_line_for_dispatch(m, line):
+    ids = mgr_line_ids(m["id"])
+    if not ids:
+        raise HTTPException(400, "Conecte o seu WhatsApp antes de disparar")
+    line = (line or "").strip()
+    if line in ("", "auto"):
+        return ids[0]
+    if line not in ids:
+        raise HTTPException(404, "Número não encontrado")
+    return line
+
+@app.get("/api/gestor/niches")
+async def gestor_niches(x_token: str = Header(default="")):
+    manager_from_token(x_token)
+    with conn() as c:
+        rows = c.execute("SELECT id,name,outbound_text FROM niches ORDER BY id").fetchall()
+    return {"niches": [dict(r) for r in rows], "default": default_niche_id()}
+
+@app.post("/api/gestor/contacts/parse")
+async def gestor_contacts_parse(b: ContactsIn, x_token: str = Header(default="")):
+    manager_from_token(x_token, write=True)
+    return await contacts_parse(b)
+
+@app.post("/api/gestor/dispatch")
+async def gestor_dispatch(b: DispatchIn, bg: BackgroundTasks, x_token: str = Header(default="")):
+    """Disparo pelos números do próprio gestor (nunca pelos do administrador ou de outro gestor). Mesmas regras: consentimento, origem, supressão."""
+    m = manager_from_token(x_token, write=True)
+    b.line = _mgr_line_for_dispatch(m, b.line)
+    r = await dispatch(b, bg)
+    log("fila", f"gestor {m['name']} colocou {r.get('queued', 0)} contato(s) na fila")
+    return r
+
+@app.get("/api/gestor/outbox")
+async def gestor_outbox(x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    ids = [] if mgr_sup(m) else mgr_line_ids(m["id"])
+    if not ids and not mgr_sup(m):
+        return {"rows": [], "queued": 0}
+    where, args = ("1=1", []) if mgr_sup(m) else (f"o.line IN ({','.join('?' * len(ids))})", ids)
+    with conn() as c:
+        rows = c.execute(f"SELECT o.id,o.phone,o.name,o.status,o.error,o.sent_at,o.line,n.name AS niche FROM outbox o LEFT JOIN niches n ON n.id=o.niche_id WHERE {where} ORDER BY o.id DESC LIMIT 60", args).fetchall()
+        queued = c.execute(f"SELECT COUNT(*) n FROM outbox o WHERE o.status='queued' AND {where}", args).fetchone()["n"]
+    return {"rows": [dict(r) for r in rows], "queued": queued}
+
+@app.post("/api/gestor/outbox/clear")
+async def gestor_outbox_clear(x_token: str = Header(default="")):
+    m = manager_from_token(x_token, write=True)
+    ids = mgr_line_ids(m["id"])
+    if not ids:
+        return {"removed": 0}
+    with conn() as c:
+        n = c.execute(f"DELETE FROM outbox WHERE status='queued' AND line IN ({','.join('?' * len(ids))})", ids).rowcount
+    log("fila", f"gestor {m['name']} limpou a fila dele: {n} contato(s)")
+    return {"removed": n}
+
+@app.get("/api/gestor/calendar")
+async def gestor_calendar_get(x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    sa = gcal_sa(); cfg = gcal_cfg()
+    return {"calendar_id": m.get("calendar_id") or "", "sa_email": sa["client_email"] if sa else "", "available": bool(sa and cfg["enabled"]),
+            "hours_note": "Os dias, horários e a duração da reunião seguem a configuração do administrador."}
+
+@app.put("/api/gestor/calendar")
+async def gestor_calendar_put(b: MgrCalIn, x_token: str = Header(default="")):
+    m = manager_from_token(x_token, write=True)
+    cid = (b.calendar_id or "").strip()[:200]
+    if cid and not re.fullmatch(r"[\w.\-+@#]+", cid):
+        raise HTTPException(400, "ID da agenda inválido (use o e-mail da agenda ou o ID que aparece nas configurações dela)")
+    with conn() as c:
+        c.execute("UPDATE managers SET calendar_id=? WHERE id=?", (cid, m["id"]))
+    return {"ok": True, "calendar_id": cid}
+
+@app.post("/api/gestor/calendar/test")
+async def gestor_calendar_test(x_token: str = Header(default="")):
+    m = manager_from_token(x_token, write=True)
+    cid = (m.get("calendar_id") or "").strip()
+    if not gcal_sa() or not gcal_cfg()["enabled"]:
+        raise HTTPException(400, "O administrador ainda não ativou a integração com o Google Agenda")
+    if not cid:
+        raise HTTPException(400, "Salve o ID da sua agenda antes de testar")
+    GCAL_CAL.set(cid)
+    try:
+        await gcal_token(force=True)
+        cal = await gcal_req("GET", f"/calendars/{cid}")
+        slots = await gcal_free("", 3)
+    except GcalError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "calendar": cal.get("summary") or cid, "slots": [d.strftime("%d/%m %H:%M") for d in slots]}

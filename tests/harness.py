@@ -209,6 +209,7 @@ def _fake_google(method, url, headers, body, data):
         t0, t1 = DT.fromisoformat(body["timeMin"]), DT.fromisoformat(body["timeMax"])
         inr = [b for b in GCAL["busy"] if DT.fromisoformat(b[0]) < t1 and DT.fromisoformat(b[1]) > t0]       # o Google só devolve o que cruza o período pedido
         return FakeResp(200, {"calendars": {cid: {"busy": [{"start": b[0], "end": b[1]} for b in inr]}}})
+    GCAL.setdefault("log", []).append((method, path))
     if "/events" in path:
         if method == "POST":
             if GCAL["fail_create"]: return FakeResp(500, {"error": {"message": "boom"}})

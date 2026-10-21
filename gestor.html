@@ -43,6 +43,11 @@ table{width:100%;border-collapse:collapse}td,th{padding:7px 6px;border-bottom:1p
 .mrow{max-width:86%}.mrow.l{align-self:flex-start}.mrow.s{align-self:flex-end}
 .msg{padding:7px 10px;border-radius:10px;border:1px solid var(--bd);white-space:pre-wrap;word-wrap:break-word;background:var(--out)}.mrow.s .msg{background:var(--in)}.msg time{display:block;font-size:11px;color:var(--mut)}
 .bar{display:flex;gap:8px;padding:10px;background:var(--card);border-top:1px solid var(--bd)}.bar textarea{resize:none;height:44px}
+.tg{font-size:11px;padding:1px 8px;border-radius:99px;margin:3px 4px 0 0;display:inline-block;color:var(--tx);border:1px solid var(--tc,#94a3b8);background:color-mix(in srgb,var(--tc,#94a3b8) 22%,transparent)}.tg.off{opacity:.45;background:transparent}button.tg{cursor:pointer;font:inherit;font-size:11px;font-weight:500;padding:1px 8px}
+.lf{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:8px 10px;border-bottom:1px solid var(--bd)}.lf input{grid-column:1/3}.lf select,.lf input{padding:6px 8px;font-size:13px}
+.kb{display:flex;gap:10px;overflow:auto;align-items:flex-start;padding:12px;height:calc(100vh - 190px)}.kcol{flex:0 0 240px;background:var(--card);border:1px solid var(--bd);border-radius:12px;display:flex;flex-direction:column;max-height:100%}.kcol.over{outline:2px dashed var(--ac)}
+.kcol h3{margin:0;padding:10px 12px;font-size:13px;display:flex;justify-content:space-between;border-bottom:1px solid var(--bd)}.kcards{overflow:auto;padding:8px;display:grid;gap:8px;min-height:40px}
+.kcard{background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:8px 10px;cursor:grab}.kcard b{display:block}.kcard small{color:var(--mut)}.kcard.drag{opacity:.4}
 .empty{margin:auto;color:var(--mut);padding:24px;text-align:center}
 .back{display:none}
 @media(max-width:860px){#chats{grid-template-columns:1fr}.cv{display:none}#chats.inchat .lst{display:none}#chats.inchat .cv{display:grid}.back{display:inline-block}}
@@ -62,12 +67,12 @@ table{width:100%;border-collapse:collapse}td,th{padding:7px 6px;border-bottom:1p
 
 <div id="app" class="hide">
  <header><b id="who"></b><span class="note" id="sub"></span><span class="sp"></span><button class="g" id="pushb">Ativar avisos</button><button class="g" id="out">Sair</button></header>
- <nav id="tabs"><button data-t="chats" class="on">Conversas</button><button data-t="wa">Meu WhatsApp</button><button data-t="team">Minha equipe</button><button data-t="perf">Desempenho</button></nav>
+ <nav id="tabs"><button data-t="chats" class="on">Conversas</button><button data-t="wa">Meu WhatsApp</button><button data-t="team">Minha equipe</button><button data-t="board">Quadro</button><button data-t="perf">Desempenho</button><button data-t="hist">Histórico</button></nav>
  <div class="pane" id="p_chats"><div id="chats">
-  <div class="lst" id="ll"></div>
+  <div class="lst"><div class="lf"><input id="lf_q" placeholder="Buscar nome, telefone ou empresa"><select id="lf_s"><option value="">Todas as etapas</option></select><select id="lf_t"><option value="">Todas as etiquetas</option></select></div><div id="ll"></div></div>
   <div class="cv">
    <div class="ch"><button class="g back" id="bk">←</button><b id="cnm">Selecione uma conversa</b><span class="tag" id="cst"></span><span class="sp"></span>
-    <button class="g hide" id="tk">Assumir</button><button class="g hide" id="rl" title="A IA volta a responder">Devolver à IA</button><button class="g hide" id="ho">Enviar à equipe</button></div>
+    <button class="g hide" id="tk">Assumir</button><button class="g hide" id="rl" title="A IA volta a responder">Devolver à IA</button><button class="g hide" id="ho">Enviar à equipe</button><div id="tgs" style="flex-basis:100%"></div></div>
    <div id="msgs"><div class="empty">Escolha uma conversa. São as conversas dos seus números de WhatsApp.</div></div>
    <div class="bar hide" id="bar"><textarea id="mi" placeholder="Escreva sua mensagem… (Enter envia)"></textarea><button id="snd">Enviar</button></div>
   </div></div></div>
@@ -83,6 +88,11 @@ table{width:100%;border-collapse:collapse}td,th{padding:7px 6px;border-bottom:1p
    <div id="tl"></div>
    <div class="row"><div><label>Nome</label><input id="an"></div><div><label>Usuário</label><input id="al" autocomplete="off"></div><div><label>Senha (vazio = gerar)</label><input id="ap" autocomplete="off"></div><div style="flex:0 0 100px"><label>Máx. conversas</label><input id="am" inputmode="numeric" value="5"></div><button id="aadd">Adicionar</button></div>
    <div class="note" id="amsg"></div></div>
+ </div></div>
+ <div class="pane hide" id="p_board"><div class="lf" style="grid-template-columns:2fr 1fr"><input id="kb_q" placeholder="Buscar nome, telefone ou empresa" style="grid-column:auto"><select id="kb_t"><option value="">Todas as etiquetas</option></select></div><div class="note" style="padding:0 12px">Arraste os cartões entre as colunas para mudar a etapa. "Com a equipe" envia à fila; "Descartado" coloca o contato na lista de supressão.</div><div class="kb" id="kb"></div></div>
+ <div class="pane hide" id="p_hist"><div class="wrap">
+  <div class="card"><h2>Histórico da equipe</h2><div class="note">Quem fez o quê nos seus números e na sua equipe (suas ações e as dos seus atendentes), incluindo a leitura de conversas. O texto das mensagens não é guardado aqui.</div>
+   <div class="row"><div style="flex:0 0 140px"><label>Período</label><select id="hd"><option value="1">1 dia</option><option value="7" selected>7 dias</option><option value="30">30 dias</option></select></div><div><label>Buscar</label><input id="hq" placeholder="ação, pessoa ou lead"></div></div><div id="hl"></div></div>
  </div></div>
  <div class="pane hide" id="p_perf"><div class="wrap">
   <div class="card"><h2>Desempenho da equipe</h2><div class="row"><div style="flex:0 0 160px"><label>Período</label><select id="pd"><option value="7">7 dias</option><option value="30" selected>30 dias</option><option value="90">90 dias</option></select></div></div><div id="pm"></div></div>
@@ -103,21 +113,21 @@ $("lf").onsubmit=async e=>{e.preventDefault();$("lerr").textContent="";$("lbtn")
   if(!r.ok)throw new Error(j.detail||"Não foi possível entrar");TK=j.token;try{localStorage.setItem("mtok",TK)}catch(e){}$("pw").value="";start()}
  catch(x){$("lerr").textContent=x.message}finally{$("lbtn").disabled=false}};
 $("out").onclick=async()=>{await pushDrop();try{await api("/api/gestor/logout",{})}catch(e){}bye()};
-document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x==b));["chats","wa","team","perf"].forEach(t=>$("p_"+t).classList.toggle("hide",t!=tab));refresh(true)});
+document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x==b));["chats","wa","team","board","perf","hist"].forEach(t=>$("p_"+t).classList.toggle("hide",t!=tab));refresh(true)});
 
 async function start(){$("login").classList.add("hide");$("app").classList.remove("hide");await refresh(true);setInterval(()=>refresh(),3000)}
 async function refresh(force){try{ME=await api("/api/gestor/me");
  $("who").textContent=ME.manager.name;$("sub").textContent=`${ME.lines.length}/${ME.manager.max_lines} número(s) · ${ME.agents.length}/${ME.manager.max_agents} atendente(s) · ${ME.queue} na fila`;
  $("blk").classList.toggle("hide",!ME.blocked);
- if(tab=="chats")await chats(force);else if(tab=="wa")await wa(force);else if(tab=="team")team();else perf(force)}catch(e){}}
+ if(tab=="chats")await chats(force);else if(tab=="wa")await wa(force);else if(tab=="team")team();else if(tab=="hist")hist(force);else if(tab=="board")board(force);else perf(force)}catch(e){}}
 
 // ---- conversas
 const stTxt=L=>L.human?(L.agent_id==-1?"com você":L.agent_id?"com "+(L.agent_name||"atendente"):"na fila da equipe"):"IA atendendo";
-async function chats(force){const d=await api("/api/gestor/leads");LEADS=d.leads;
- const sig=JSON.stringify([LEADS.map(x=>[x.phone,x.human,x.agent_id,x.last_ts]),cur]);if(force||sig!=lastSig){lastSig=sig;
-  $("ll").innerHTML=LEADS.map(x=>`<div class="it ${x.phone==cur?"sel":""}" data-p="${x.phone}"><b>${esc(x.name||x.phone)}</b><small>${esc(stTxt(x))} · ${esc((x.last_text||"").slice(0,60))}</small></div>`).join("")||'<div class="empty">Nenhuma conversa ainda nos seus números.</div>';
+async function chats(force){const d=await api("/api/gestor/leads");LEADS=d.leads;TAGS=d.tags||[];STAGES=d.stages||[];fillFilters();
+ const sig=JSON.stringify([LEADS.map(x=>[x.phone,x.human,x.agent_id,x.last_ts,x.stage,x.tags]),cur,$("lf_q").value,$("lf_s").value,$("lf_t").value]);if(force||sig!=lastSig){lastSig=sig;
+  $("ll").innerHTML=filterLeads(LEADS,"lf").map(x=>`<div class="it ${x.phone==cur?"sel":""}" data-p="${x.phone}"><b>${esc(x.name||x.phone)}</b><small>${esc(stTxt(x))} · ${esc((x.last_text||"").slice(0,60))}</small>${tagChips(x.tags)}</div>`).join("")||'<div class="empty">Nenhuma conversa ainda nos seus números.</div>';
   document.querySelectorAll("#ll .it").forEach(e=>e.onclick=()=>{cur=e.dataset.p;lastSig="";$("chats").classList.add("inchat");window._ms="";chats(true)})}
- const L=LEADS.find(x=>x.phone==cur);
+ const L=LEADS.find(x=>x.phone==cur);renderLeadTags(L);
  $("cnm").textContent=L?(L.name||L.phone):"Selecione uma conversa";$("cst").textContent=L?stTxt(L):"";$("cst").classList.toggle("hide",!L);
  const mine=L&&L.human&&L.agent_id==-1;
  $("tk").classList.toggle("hide",!L||mine);$("rl").classList.toggle("hide",!L||(!L.human));$("ho").classList.toggle("hide",!L||(L.human&&L.agent_id>0)||!ME.agents.length);$("bar").classList.toggle("hide",!mine);
@@ -168,6 +178,36 @@ const fmt=s=>s==null?"—":s<90?s+" s":s<5400?Math.round(s/60)+" min":(s/3600).t
 async function perf(force){if(!force&&window._pf)return;window._pf=1;try{const d=await api("/api/gestor/metrics?days="+$("pd").value);
  $("pm").innerHTML=d.agents.length?'<table><thead><tr><th>Atendente</th><th>Conversas</th><th>Mensagens</th><th>1ª resposta</th><th>Espera na fila</th><th>Ganhos</th><th>Perdidos</th></tr></thead><tbody>'+d.agents.map(a=>`<tr><td>${esc(a.name)}</td><td>${a.handled}</td><td>${a.messages}</td><td>${fmt(a.first_reply_s)}</td><td>${fmt(a.queue_wait_s)}</td><td>${a.won}</td><td>${a.lost}</td></tr>`).join("")+'</tbody></table>':'<div class="note">Crie atendentes para ver o desempenho.</div>'}catch(e){}finally{setTimeout(()=>window._pf=0,15000)}}
 $("pd").onchange=()=>{window._pf=0;perf(true)};
+// etiquetas, filtros e quadro
+let TAGS=[],STAGES=[];const TCOL={verde:"#25d366",azul:"#3b82f6",amarelo:"#eab308",laranja:"#f97316",vermelho:"#ef4444",roxo:"#8b5cf6",rosa:"#ec4899",cinza:"#94a3b8"};
+const tagOf=id=>TAGS.find(t=>t.id==id);
+function tagChips(ids){return (ids||[]).map(tagOf).filter(Boolean).map(t=>`<span class="tg" style="--tc:${TCOL[t.color]||"#94a3b8"}">${esc(t.name)}</span>`).join("")}
+function fillFilters(){const sig=JSON.stringify([TAGS,STAGES]);if(sig==window._fs)return;window._fs=sig;const k={s:$("lf_s").value,t:$("lf_t").value,b:$("kb_t").value};
+ $("lf_s").innerHTML='<option value="">Todas as etapas</option>'+STAGES.map(([a,b])=>`<option value="${a}">${esc(b)}</option>`).join("");
+ const to='<option value="">Todas as etiquetas</option>'+TAGS.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join("");$("lf_t").innerHTML=to;$("kb_t").innerHTML=to;$("lf_s").value=k.s;$("lf_t").value=k.t;$("kb_t").value=k.b}
+function filterLeads(ls,p){const q=($(p+"_q").value||"").toLowerCase().trim(),st=$(p+"_s")?$(p+"_s").value:"",tg=$(p+"_t").value;
+ return ls.filter(l=>(!q||[l.name,l.phone,l.company].some(x=>String(x||"").toLowerCase().includes(q)))&&(!st||l.stage==st)&&(!tg||(l.tags||[]).includes(+tg)))}
+["lf_q","lf_s","lf_t"].forEach(i=>$(i).oninput=()=>{lastSig="";chats(true)});
+function renderLeadTags(L){const box=$("tgs");if(!L||!TAGS.length){box.innerHTML="";return}
+ box.innerHTML=TAGS.map(t=>`<button type="button" class="tg ${(L.tags||[]).includes(t.id)?"":"off"}" style="--tc:${TCOL[t.color]||"#94a3b8"}" data-t="${t.id}">${esc(t.name)}</button>`).join("");
+ box.querySelectorAll("button").forEach(b=>b.onclick=async()=>{const id=+b.dataset.t,st=new Set(L.tags||[]);st.has(id)?st.delete(id):st.add(id);try{const r=await api("/api/gestor/leads/"+L.phone+"/tags",{tags:[...st]},"PUT");L.tags=r.tags;lastSig="";chats(true)}catch(e){fail(e)}})}
+async function board(force){const d=await api("/api/gestor/leads");LEADS=d.leads;TAGS=d.tags||[];STAGES=d.stages||[];fillFilters();
+ const sig=JSON.stringify([LEADS.map(x=>[x.phone,x.stage,x.tags,x.name]),$("kb_q").value,$("kb_t").value]);if(!force&&sig==window._ks)return;window._ks=sig;
+ const ls=filterLeads(LEADS,"kb");
+ $("kb").innerHTML=STAGES.map(([k,v])=>{const c=ls.filter(l=>l.stage==k);return`<div class="kcol" data-s="${k}"><h3>${esc(v)} <span class="note">${c.length}</span></h3><div class="kcards">`+c.map(l=>`<div class="kcard" draggable="true" data-p="${l.phone}"><b>${esc(l.name||l.phone)}</b><small>${esc(l.company||l.phone)}${l.agent_name?" · "+esc(l.agent_name):""}</small><div>${tagChips(l.tags)}</div></div>`).join("")+`</div></div>`}).join("");
+ let dragP=null;
+ $("kb").querySelectorAll(".kcard").forEach(c=>{c.ondragstart=e=>{dragP=c.dataset.p;c.classList.add("drag");e.dataTransfer.setData("text/plain",dragP)};c.ondragend=()=>c.classList.remove("drag");c.onclick=()=>{cur=c.dataset.p;document.querySelector('#tabs button[data-t="chats"]').click()}});
+ $("kb").querySelectorAll(".kcol").forEach(col=>{col.ondragover=e=>{e.preventDefault();col.classList.add("over")};col.ondragleave=()=>col.classList.remove("over");
+  col.ondrop=async e=>{e.preventDefault();col.classList.remove("over");const p=dragP||e.dataTransfer.getData("text/plain"),st=col.dataset.s,l=LEADS.find(x=>x.phone==p);if(!l||l.stage==st)return;
+   if(st=="descartado"&&!confirm("Descartar este lead? O contato entra na lista de supressão e nunca mais recebe mensagem."))return;
+   if(st=="humano"&&!confirm("Enviar esta conversa à equipe?"))return;
+   if(l.human&&st!="humano"&&!confirm("Esta conversa está com a equipe. Mover para fora de 'Com a equipe' devolve a conversa à IA. Continuar?"))return;
+   try{await api("/api/gestor/leads/"+p+"/stage",{stage:st})}catch(x){fail(x)}board(true)}})}
+["kb_q","kb_t"].forEach(i=>$(i).oninput=()=>board(true));
+// ---- histórico
+async function hist(force){if(!force&&window._hf)return;window._hf=1;try{const d=await api(`/api/gestor/audit?days=${$("hd").value}&q=${encodeURIComponent($("hq").value)}`);
+ $("hl").innerHTML=d.rows.length?'<table><thead><tr><th>Quando</th><th>Pessoa</th><th>Ação</th><th>Alvo</th></tr></thead><tbody>'+d.rows.map(r=>`<tr><td style="white-space:nowrap">${new Date(r.ts*1e3).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</td><td>${esc(r.actor_name)}</td><td>${esc(r.action)}</td><td>${esc(r.target)}</td></tr>`).join("")+'</tbody></table>':'<div class="note">Nenhum registro neste filtro.</div>'}catch(e){}finally{setTimeout(()=>window._hf=0,15000)}}
+$("hd").onchange=()=>{window._hf=0;hist(true)};$("hq").onkeydown=e=>{if(e.key=="Enter"){window._hf=0;hist(true)}};
 // app no celular: instalar na tela inicial e receber avisos
 const PFX="/api/gestor";let SWR=null;
 function b2u(s){const p="=".repeat((4-s.length%4)%4),r=atob((s+p).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...r].map(c=>c.charCodeAt(0)))}

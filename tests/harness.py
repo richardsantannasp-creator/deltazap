@@ -52,6 +52,7 @@ class Response:
         self.content, self.media_type, self.headers = content, media_type, headers or {}
 class HTMLResponse: pass
 ROUTES, STARTUP = [], []
+MIDDLEWARE = []
 class FastAPI:
     def __init__(self, **k): pass
     def _reg(self, method):
@@ -62,6 +63,9 @@ class FastAPI:
     def __getattr__(self, name):
         if name in ("get", "post", "put", "delete"): return self._reg(name.upper())
         raise AttributeError(name)
+    def middleware(self, kind):
+        def wrap(fn): MIDDLEWARE.append(fn); return fn
+        return wrap
     def on_event(self, ev):
         def wrap(fn): STARTUP.append(fn); return fn
         return wrap
@@ -404,6 +408,8 @@ async def serve(port):
             headers = {k.strip().lower(): v.strip() for k, v in (h.split(":", 1) for h in head[1:] if ":" in h)}
             n = int(headers.get("content-length", "0")); body = await reader.readexactly(n) if n else b""
             status, ctype, payload = await call_route(S, method, target, headers, body)
+            if not target.startswith("/__test/"):      # o middleware de auditoria do servidor real (aqui chamado à mão)
+                S.audit_request(method, urlparse(target).path, headers.get("x-token", ""), status, "127.0.0.1")
         except Exception as e:
             status, ctype, payload = 500, "text/plain", repr(e).encode()
         writer.write(f"HTTP/1.1 {status} X\r\nContent-Type: {ctype}\r\nContent-Length: {len(payload)}\r\nConnection: close\r\n\r\n".encode() + payload)

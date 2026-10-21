@@ -615,7 +615,7 @@ const step = async (name, fn) => {
     await page.click('#kbl a[data-de]'); expect((await page.inputValue('#kbt')) === 'Entrega' || true, ''); await page.click('#kbcancel')
   })
   await step('Pagamentos: escolher Asaas, salvar sem expor a chave, URL do webhook e teste de conexão', async () => {
-    await page.click('#t8'); await page.waitForSelector('#py_p'); await page.selectOption('#py_p', 'asaas'); expect(await page.isVisible('#py_ak') && !(await page.isVisible('#py_sk')), 'campos do Asaas')
+    await page.click('#t8'); await page.waitForSelector('#py_p'); await until(async () => (await page.getAttribute('#py_ak', 'placeholder')) !== '', 5000, 'configuração de pagamento carregada'); await page.selectOption('#py_p', 'asaas'); expect(await page.isVisible('#py_ak') && !(await page.isVisible('#py_sk')), 'campos do Asaas')
     await page.fill('#py_ak', '$aact_chave_secreta'); await page.click('#py_save')
     await until(async () => (await page.textContent('#pays')).includes('Salvo'), 4000, 'salvo')
     const g = (await api('/api/pay')).json; expect(g.provider === 'asaas' && g.has_asaas && !JSON.stringify(g).includes('chave_secreta'), 'a chave não pode voltar na API')
@@ -681,6 +681,54 @@ const step = async (name, fn) => {
     await ctx2.close()
   })
 
+  await step('Auditoria: o administrador vê o histórico de ações e baixa o CSV', async () => {
+    await page.click('#t5'); await page.waitForSelector('#au_list')
+    await page.click('#au_go'); await until(async () => (await page.innerText('#au_list')).includes('Criou atendente'), 8000, 'registro da criação do atendente')
+    const t = await page.innerText('#au_list')
+    expect(t.includes('Administrador'), 'quem fez aparece')
+    expect(!t.includes('plano de saúde para minha família'), 'o texto das mensagens não é guardado')
+    const csv = await (await page.request.get(BASE + '/api/audit.csv?days=7', { headers: { 'X-Token': TOKEN } })).text()
+    expect(csv.includes('data_hora') && csv.includes('Criou atendente'), 'CSV da auditoria')
+  })
+
+  await step('Etiquetas, filtros e quadro: etiquetar, filtrar e arrastar o cartão para outra etapa', async () => {
+    await page.click('#t1'); await page.waitForSelector('#leads .item')
+    await page.click('#leads .item[data-p="5521933330001"]')
+    await until(async () => await page.isVisible('#tgs button'), 6000, 'etiquetas do lead')
+    await page.click('#tgs button:has-text("Quente")')
+    await until(async () => (await db("SELECT COUNT(*) n FROM lead_tags WHERE phone='5521933330001'"))[0].n === 1, 5000, 'etiqueta gravada')
+    await page.fill('#lf_q', 'Marcos'); await until(async () => (await page.locator('#leads .item').count()) === 1, 5000, 'filtro por nome')
+    await page.fill('#lf_q', '')
+    await page.selectOption('#lf_t', { label: 'Quente' }); await until(async () => (await page.locator('#leads .item').count()) === 1, 5000, 'filtro por etiqueta')
+    await page.selectOption('#lf_t', { label: 'Frio' }); await until(async () => (await page.locator('#leads .item').count()) === 0, 5000, 'filtro por outra etiqueta esvazia a lista')
+    await page.selectOption('#lf_t', ''); await until(async () => (await page.locator('#leads .item').count()) > 1, 5000, 'filtro limpo')
+    await page.click('#t9'); await page.waitForSelector('.kcol[data-s="qualificado"]')
+    const nCols = await page.locator('.kcol').count(); expect(nCols === 9, 'nove colunas no quadro: ' + nCols)
+    const antes = (await lead('5521933330001')).stage
+    const alvo = antes === 'sem_resposta' ? 'novo' : 'sem_resposta'
+    await page.evaluate(([p, st]) => {
+      const dt = new DataTransfer(), card = document.querySelector(`.kcard[data-p="${p}"]`), col = document.querySelector(`.kcol[data-s="${st}"]`)
+      card.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }))
+      col.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }))
+      col.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }))
+    }, ['5521933330001', alvo])
+    await until(async () => (await lead('5521933330001')).stage === alvo, 8000, 'etapa alterada pelo quadro (de ' + antes + ' para ' + alvo + ')')
+    await until(async () => (await page.locator(`.kcol[data-s="${alvo}"] .kcard[data-p="5521933330001"]`).count()) === 1, 8000, 'cartão na nova coluna')
+    await page.click('#t1')
+  })
+
+  await step('Roteiros: criar um menu de boas-vindas pela tela e ver o roteiro na lista', async () => {
+    await page.click('#t5'); await page.waitForSelector('#fl_new'); await page.click('#fl_new')
+    await page.fill('#fl_name', 'Menu inicial'); await page.selectOption('#fl_trig', 'first')
+    await page.fill('#fl_msg', 'Olá! Escolha uma opção:'); await page.click('#fl_addopt')
+    await page.fill('#fl_opts .fo_l', 'Horário'); await page.fill('#fl_opts .fo_v', 'Atendemos de segunda a sexta.')
+    await page.click('#fl_save')
+    await until(async () => (await page.innerText('#fl_list')).includes('Menu inicial'), 6000, 'roteiro na lista')
+    expect((await db("SELECT COUNT(*) n FROM flows WHERE name='Menu inicial'"))[0].n === 1, 'roteiro gravado')
+    await page.click('#fl_list [data-fd]'); await until(async () => !(await page.innerText('#fl_list')).includes('Menu inicial'), 6000, 'roteiro excluído')
+    await page.click('#t1')
+  })
+
   // ---------- gestor de equipe ----------
   await step('Gestor: administrador cria o acesso; gestor entra, cria a própria equipe e vê o isolamento', async () => {
     await page.click('#t5'); await page.waitForSelector('#gm_name')
@@ -703,6 +751,7 @@ const step = async (name, fn) => {
     await until(async () => (await gp.innerText('#tl')).includes('Duda Equipe'), 6000, 'atendente na lista do gestor')
     expect(!(await gp.innerText('#tl')).includes('Rita'), 'gestor não vê atendentes do administrador')
     await gp.click('#tabs button[data-t="perf"]'); await until(async () => (await gp.innerText('#pm')).includes('Duda Equipe'), 6000, 'desempenho da equipe do gestor')
+    await gp.click('#tabs button[data-t="hist"]'); await until(async () => (await gp.innerText('#hl')).includes('Criou atendente'), 8000, 'histórico do gestor mostra a ação dele')
     await gp.click('#tabs button[data-t="wa"]'); await until(async () => await gp.isVisible('#addl'), 6000, 'adicionar número')
     await page.click('#t5'); await until(async () => (await page.innerText('#tm_list')).includes('gestor: Gil Gestor'), 8000, 'administrador vê o atendente com a etiqueta do gestor')
     expect(errs.length === 0, 'erros JS no painel do gestor: ' + errs.join('; '))

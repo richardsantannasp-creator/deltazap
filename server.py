@@ -578,6 +578,11 @@ async def handle_incoming(phone, name, text, wamid=None, send=True, line=None):
             log("ia", f"{phone}: lead descartado, sem resposta")
             return
         try:
+            if await flow_engine(phone, text, send=send):
+                return
+        except Exception as e:
+            log("erro", f"roteiro: {e}")
+        try:
             reply = await run_agent(phone)
         except Exception as e:
             log("erro", f"Claude: {e}")
@@ -1234,10 +1239,12 @@ async def leads():
     with conn() as c:
         rows = c.execute("SELECT l.*, n.name AS niche, a.name AS agent_name FROM leads l LEFT JOIN niches n ON n.id=l.niche_id LEFT JOIN agents a ON a.id=l.agent_id ORDER BY l.created DESC").fetchall()
     out = []
+    tg = lead_tag_map()
     for r in rows:
         d = dict(r)
         dt = parse_meeting(d.get("meeting") or "")
         d["meeting_start"] = dt.strftime("%Y-%m-%dT%H:%M") if dt else None
+        d["tags"] = tg.get(d["phone"], [])
         out.append(d)
     return out
 
@@ -3338,8 +3345,9 @@ def erase_lead(phone, keep_suppression=None):
         for t in ("messages", "files", "outbox", "stage_events", "alerts", "crm_refs", "crm_log", "leads"):
             c.execute(f"DELETE FROM {t} WHERE phone=?", (phone,))
         c.execute("DELETE FROM avatars WHERE who=?", (phone,))
-        c.execute("DELETE FROM material_sends WHERE phone=?", (phone,)); c.execute("DELETE FROM notes WHERE phone=?", (phone,))            # a foto também é dado pessoal
+        c.execute("DELETE FROM material_sends WHERE phone=?", (phone,)); c.execute("DELETE FROM notes WHERE phone=?", (phone,)); c.execute("DELETE FROM lead_tags WHERE phone=?", (phone,))            # a foto também é dado pessoal
         c.execute("UPDATE usage SET phone='' WHERE phone=?", (phone,))            # mantém o custo, sem o número
+        c.execute("UPDATE audit SET target='(lead excluído)' WHERE target=?", (phone,))     # a auditoria também não guarda o número de quem foi apagado
         c.execute("DELETE FROM events WHERE text LIKE ?", (f"%{phone}%",))
     shutil.rmtree(UPLOADS / digits, ignore_errors=True)
     RESP_LAST.pop(phone, None)
@@ -4416,6 +4424,7 @@ async def agent_login(b: AgentLoginIn):
         a = c.execute("SELECT * FROM agents WHERE login=? AND active=1", (lg,)).fetchone()
     if not a or not pw_ok(b.password or "", a["pw"]):
         LOGIN_FAILS[lg] = fails + [now]
+        audit_add("atendente", 0, lg, "Tentativa de login recusada", lg, 401)
         raise HTTPException(401, "Usuário ou senha incorretos")
     LOGIN_FAILS.pop(lg, None)
     tok = secrets.token_urlsafe(32)
@@ -4424,6 +4433,7 @@ async def agent_login(b: AgentLoginIn):
         c.execute("INSERT INTO agent_sessions(th,agent_id,created,expires) VALUES(?,?,?,?)", (tok_hash(tok), a["id"], now, now + SESS_DAYS * 86400))
         c.execute("UPDATE agents SET last_seen=?, available=1 WHERE id=?", (now, a["id"]))
     log("humano", f"{a['name']} entrou no painel do atendente")
+    audit_add("atendente", a["id"], a["name"], "Entrou no painel")
     await handoff_sweep()
     return {"token": tok, "agent": agent_public({**dict(a), "last_seen": now, "available": 1}, now)}
 
@@ -4483,7 +4493,8 @@ async def agent_leads(x_token: str = Header(default="")):
             ORDER BY COALESCE(l.handoff_at,l.created)""", (a["id"], a["id"])).fetchall()
     lm, mid = line_mgr_map(), a.get("manager_id") or 0
     rows = [r for r in rows if r["agent_id"] == a["id"] or lm.get(r["line"] or "main", 0) == mid]
-    return {"leads": [dict(r) for r in rows], "agent": agent_public(a)}
+    tg = lead_tag_map()
+    return {"leads": [{**dict(r), "tags": tg.get(r["phone"], [])} for r in rows], "agent": agent_public(a), "tags": tag_list()}
 
 @app.get("/api/agent/messages/{phone}")
 async def agent_messages(phone: str, x_token: str = Header(default="")):
@@ -5882,6 +5893,7 @@ async def gestor_login(b: AgentLoginIn):
         m = c.execute("SELECT * FROM managers WHERE login=? AND active=1", (lg,)).fetchone()
     if not m or not pw_ok(b.password or "", m["pw"]):
         LOGIN_FAILS[key] = fails + [now]
+        audit_add("gestor", 0, lg, "Tentativa de login recusada", lg, 401)
         raise HTTPException(401, "Usuário ou senha incorretos")
     LOGIN_FAILS.pop(key, None)
     tok = secrets.token_urlsafe(32)
@@ -5890,6 +5902,7 @@ async def gestor_login(b: AgentLoginIn):
         c.execute("INSERT INTO manager_sessions(th,manager_id,created,expires) VALUES(?,?,?,?)", (mtok_hash(tok), m["id"], now, now + SESS_DAYS * 86400))
         c.execute("UPDATE managers SET last_seen=? WHERE id=?", (now, m["id"]))
     log("humano", f"gestor {m['name']} entrou")
+    audit_add(m["role"] if "role" in m.keys() else "gestor", m["id"], m["name"], "Entrou no painel")
     return {"token": tok, "manager": manager_public(dict(m))}
 
 @app.post("/api/gestor/logout")
@@ -5994,7 +6007,8 @@ async def gestor_leads(x_token: str = Header(default="")):
             (SELECT ts FROM messages m WHERE m.phone=l.phone ORDER BY id DESC LIMIT 1) AS last_ts
             FROM leads l LEFT JOIN agents a ON a.id=l.agent_id
             WHERE l.test=0 AND l.line IN ({ph}) ORDER BY COALESCE(last_ts,l.created) DESC LIMIT 300""", ids).fetchall()
-    return {"leads": [dict(r) for r in rows]}
+    tg = lead_tag_map()
+    return {"leads": [{**dict(r), "tags": tg.get(r["phone"], [])} for r in rows], "tags": tag_list(), "stages": STAGES}
 
 @app.get("/api/gestor/messages/{phone}")
 async def gestor_messages(phone: str, x_token: str = Header(default="")):
@@ -6242,3 +6256,499 @@ async def app_icon(size: int):
     if size not in (192, 512):
         raise HTTPException(404)
     return FileResponse(HERE / "static" / f"icon-{size}.png", media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+
+# ======================================================================
+# v17: auditoria (quem fez o quê). Registra ações que mudam algo e a leitura de conversas.
+# Não guarda o texto das mensagens nem corpos de requisição: só quem, o quê, em qual lead/registro, quando e de onde.
+# ======================================================================
+AUDIT_KEEP_DAYS = int(os.getenv("AUDIT_KEEP_DAYS", "365"))
+AUDIT_READ_GAP = 1800          # a leitura da mesma conversa pela mesma pessoa conta uma vez a cada 30 min
+AUDIT_LAST = {}
+
+def migrate_v17():
+    with conn() as c:
+        if "role" not in {r["name"] for r in c.execute("PRAGMA table_info(managers)")}:
+            c.execute("ALTER TABLE managers ADD COLUMN role TEXT DEFAULT 'gestor'")
+        c.executescript("""CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, actor TEXT, actor_id INTEGER DEFAULT 0, actor_name TEXT DEFAULT '',
+            action TEXT, target TEXT DEFAULT '', status INTEGER DEFAULT 0, ip TEXT DEFAULT '');
+            CREATE INDEX IF NOT EXISTS audit_ts ON audit(ts);""")
+migrate_v17()
+
+AUDIT_SKIP = re.compile(r"^/(webhook|gateway/|pay/webhook/)|^/api/(push|simulate|simulate-file|contacts/parse|test-lead)\b|/suggest$|^/api/agent/status$")
+AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale; "T" indica onde está o alvo (grupo 1).
+    ("POST", r"^/api/niches$", "Criou agente/nicho"), ("PUT", r"^/api/niches/(\d+)$", "Alterou agente/nicho"), ("DELETE", r"^/api/niches/(\d+)$", "Excluiu agente/nicho"),
+    ("POST", r"^/api/dispatch$", "Criou disparo"), ("PUT", r"^/api/pacing$", "Alterou ritmo de envio"), ("POST", r"^/api/outbox/pause$", "Pausou/retomou a fila de envio"), ("POST", r"^/api/outbox/clear$", "Limpou a fila de envio"),
+    ("POST", r"^/api/connection/pair$", "Gerou código de conexão do WhatsApp"), ("POST", r"^/api/connection/logout$", "Desconectou o WhatsApp"),
+    ("POST", r"^/api/lines$", "Adicionou número de WhatsApp"), ("PUT", r"^/api/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/lines/([\w-]+)$", "Removeu número de WhatsApp"),
+    ("POST", r"^/api/qr-ack$", "Aceitou o risco do modo QR"), ("POST", r"^/api/lgpd/suppress$", "Adicionou números à lista de supressão"),
+    ("DELETE", r"^/api/leads/(\d+)$", "Apagou os dados de um lead (LGPD)"), ("POST", r"^/api/leads/(\d+)/takeover$", "Assumiu/devolveu a conversa (painel)"),
+    ("POST", r"^/api/leads/(\d+)/send$", "Enviou mensagem manual"), ("POST", r"^/api/leads/(\d+)/outcome$", "Definiu resultado do lead"), ("POST", r"^/api/leads/(\d+)/handled$", "Marcou lead como atendido"),
+    ("POST", r"^/api/leads/(\d+)/handoff$", "Enviou conversa à equipe"), ("POST", r"^/api/leads/(\d+)/stage$", "Moveu o lead de etapa"), ("PUT", r"^/api/leads/(\d+)/tags$", "Alterou etiquetas do lead"),
+    ("POST", r"^/api/notes/(\d+)$", "Anotou no lead"), ("DELETE", r"^/api/notes/item/(\d+)$", "Apagou nota"),
+    ("PUT", r"^/api/(alerts|cadence|costs/config|integrations|digest|hours|pay|handoff|gcal)$", "Alterou configuração: \\1"),
+    ("POST", r"^/api/(alerts|integrations|offsite|digest|pay|gcal)/test$", "Testou: \\1"), ("POST", r"^/api/offsite/run$", "Enviou cópia de segurança para fora"), ("POST", r"^/api/backups$", "Criou cópia de segurança"),
+    ("POST", r"^/api/materials$", "Cadastrou material"), ("PUT", r"^/api/materials/(\d+)$", "Alterou material"), ("DELETE", r"^/api/materials/(\d+)$", "Excluiu material"),
+    ("POST", r"^/api/quick$", "Criou resposta rápida"), ("PUT", r"^/api/quick/(\d+)$", "Alterou resposta rápida"), ("DELETE", r"^/api/quick/(\d+)$", "Excluiu resposta rápida"),
+    ("POST", r"^/api/(kb|products)$", "Adicionou à base: \\1"), ("PUT", r"^/api/(kb|products)/(\d+)$", "Alterou base: \\1"), ("DELETE", r"^/api/(kb|products)/(\d+)$", "Excluiu da base: \\1"), ("POST", r"^/api/(kb|products)/import$", "Importou base: \\1"),
+    ("POST", r"^/api/orders/(\d+)/(paid|cancel)$", "Alterou pedido"), ("POST", r"^/api/eval/(estimate|run)$", "Rodou avaliação da IA"), ("DELETE", r"^/api/eval/(\d+)$", "Excluiu avaliação da IA"),
+    ("POST", r"^/api/agents$", "Criou atendente"), ("PUT", r"^/api/agents/(\d+)$", "Alterou atendente"), ("DELETE", r"^/api/agents/(\d+)$", "Excluiu atendente"),
+    ("POST", r"^/api/managers$", "Criou gestor"), ("PUT", r"^/api/managers/(\d+)$", "Alterou gestor"), ("DELETE", r"^/api/managers/(\d+)$", "Excluiu gestor"),
+    ("POST", r"^/api/tags$", "Criou etiqueta"), ("PUT", r"^/api/tags/(\d+)$", "Alterou etiqueta"), ("DELETE", r"^/api/tags/(\d+)$", "Excluiu etiqueta"),
+    ("POST", r"^/api/flows$", "Criou roteiro"), ("PUT", r"^/api/flows/(\d+)$", "Alterou roteiro"), ("DELETE", r"^/api/flows/(\d+)$", "Excluiu roteiro"),
+    ("POST", r"^/api/agent/notes/(\d+)$", "Anotou no lead"), ("POST", r"^/api/agent/send/(\d+)$", "Respondeu o lead"), ("POST", r"^/api/agent/claim/(\d+)$", "Assumiu a conversa"),
+    ("POST", r"^/api/agent/release/(\d+)$", "Devolveu a conversa à IA"), ("POST", r"^/api/agent/transfer/(\d+)$", "Transferiu a conversa"), ("POST", r"^/api/agent/outcome/(\d+)$", "Definiu resultado do lead"),
+    ("POST", r"^/api/agent/leads/(\d+)/tags$", "Alterou etiquetas do lead"), ("PUT", r"^/api/agent/leads/(\d+)/tags$", "Alterou etiquetas do lead"),
+    ("POST", r"^/api/(agent|gestor)/2fa/(setup|enable|disable)$", "Verificação em duas etapas: \\2"),
+    ("POST", r"^/api/gestor/lines$", "Adicionou número de WhatsApp"), ("PUT", r"^/api/gestor/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/gestor/lines/([\w-]+)$", "Removeu número de WhatsApp"),
+    ("POST", r"^/api/gestor/pair$", "Gerou código de conexão do WhatsApp"), ("POST", r"^/api/gestor/line-logout$", "Desconectou o WhatsApp"),
+    ("POST", r"^/api/gestor/agents$", "Criou atendente"), ("PUT", r"^/api/gestor/agents/(\d+)$", "Alterou atendente"), ("DELETE", r"^/api/gestor/agents/(\d+)$", "Excluiu atendente"),
+    ("POST", r"^/api/gestor/handoff/(\d+)$", "Enviou conversa à equipe"), ("POST", r"^/api/gestor/takeover/(\d+)$", "Assumiu/devolveu a conversa"), ("POST", r"^/api/gestor/send/(\d+)$", "Respondeu o lead"),
+    ("POST", r"^/api/gestor/dispatch$", "Criou disparo"), ("PUT", r"^/api/gestor/calendar$", "Alterou a agenda do gestor"),
+    ("POST", r"^/api/gestor/leads/(\d+)/tags$", "Alterou etiquetas do lead"), ("PUT", r"^/api/gestor/leads/(\d+)/tags$", "Alterou etiquetas do lead"),
+    ("POST", r"^/api/gestor/leads/(\d+)/stage$", "Moveu o lead de etapa"),
+]
+AUDIT_LABELS = [(m, re.compile(r), t) for m, r, t in AUDIT_LABELS]
+AUDIT_READ = re.compile(r"^/api/(?:agent/|gestor/|supervisor/)?messages/(\d+)$")
+
+def audit_actor(tok):
+    if not tok:
+        return ("anônimo", 0, "")
+    if DASH_TOKEN and hmac.compare_digest(tok, DASH_TOKEN):
+        return ("administrador", 0, "Administrador")
+    with conn() as c:
+        r = c.execute("SELECT a.id,a.name FROM agent_sessions s JOIN agents a ON a.id=s.agent_id WHERE s.th=?", (tok_hash(tok),)).fetchone()
+        if r:
+            return ("atendente", r["id"], r["name"])
+        r = c.execute("SELECT m.id,m.name,m.role FROM manager_sessions s JOIN managers m ON m.id=s.manager_id WHERE s.th=?", (mtok_hash(tok),)).fetchone()
+        if r:
+            return ((r["role"] or "gestor") if "role" in r.keys() else "gestor", r["id"], r["name"])
+    return ("desconhecido", 0, "")
+
+def audit_add(actor, actor_id, actor_name, action, target="", status=0, ip=""):
+    try:
+        with conn() as c:
+            c.execute("INSERT INTO audit(ts,actor,actor_id,actor_name,action,target,status,ip) VALUES(?,?,?,?,?,?,?,?)", (time.time(), actor, actor_id, actor_name[:80], action[:200], str(target)[:80], int(status), ip[:60]))
+            if random.random() < 0.01:
+                c.execute("DELETE FROM audit WHERE ts<?", (time.time() - AUDIT_KEEP_DAYS * 86400,))
+    except Exception:
+        pass
+
+def audit_label(method, path):
+    for m, rx, text in AUDIT_LABELS:
+        if m == method:
+            mt = rx.match(path)
+            if mt:
+                g = mt.groups()
+                label = rx.sub(text, path) if "\\" in text else text
+                tgt = next((x for x in g if x and (x.isdigit() or "-" in x)), "")
+                return label, (tgt if re.fullmatch(r"\d{8,}", tgt or "") or tgt.isdigit() or "-" in (tgt or "") else "")
+    return None, ""
+
+def audit_request(method, path, tok, status, ip=""):
+    """Registra (ou ignora) uma requisição já respondida. Separada do middleware para poder ser testada."""
+    if AUDIT_SKIP.search(path) or not path.startswith("/api/"):
+        return
+    actor, aid, name = audit_actor(tok)
+    if method == "GET":
+        mt = AUDIT_READ.match(path)
+        if mt and status < 400:
+            key = (actor, aid, mt.group(1))
+            if time.time() - AUDIT_LAST.get(key, 0) > AUDIT_READ_GAP:
+                AUDIT_LAST[key] = time.time()
+                audit_add(actor, aid, name, "Leu a conversa", mt.group(1), status, ip)
+        elif status == 401 and tok:
+            if time.time() - AUDIT_LAST.get(("401", ip), 0) > 60:
+                AUDIT_LAST[("401", ip)] = time.time()
+                audit_add("anônimo", 0, "", "Acesso negado (token ou sessão inválidos)", path, status, ip)
+        return
+    if method not in ("POST", "PUT", "DELETE") or path.endswith("/login") or path.endswith("/logout"):
+        return
+    label, tgt = audit_label(method, path)
+    if label is None:
+        label, tgt = f"{method} {path}", ""
+    if label.startswith("Apagou os dados"):
+        tgt = "(lead excluído)"
+    audit_add(actor, aid, name, label + ("" if status < 400 else f" (recusada: {status})"), tgt, status, ip)
+
+def _client_ip(request):
+    xf = request.headers.get("x-forwarded-for", "")
+    return (xf.split(",")[0].strip() if xf else (request.client.host if request.client else ""))
+
+@app.middleware("http")
+async def audit_middleware(request: Request, call_next):
+    resp = await call_next(request)
+    try:
+        audit_request(request.method, request.url.path, request.headers.get("x-token", ""), resp.status_code, _client_ip(request))
+    except Exception:
+        pass
+    return resp
+
+def audit_rows(days=30, actor="", q="", limit=300, scope=None):
+    since = time.time() - max(1, min(int(days or 30), 3650)) * 86400
+    sql, args = "SELECT * FROM audit WHERE ts>?", [since]
+    if actor:
+        sql += " AND actor=?"; args.append(actor)
+    if q:
+        sql += " AND (action LIKE ? OR target LIKE ? OR actor_name LIKE ?)"; args += [f"%{q}%"] * 3
+    if scope:
+        sql += f" AND ({scope[0]})"; args += scope[1]
+    sql += " ORDER BY id DESC LIMIT ?"; args.append(max(1, min(int(limit or 300), 5000)))
+    with conn() as c:
+        return [dict(r) for r in c.execute(sql, args)]
+
+@app.get("/api/audit", dependencies=[Depends(auth)])
+async def audit_list(days: int = 30, actor: str = "", q: str = "", limit: int = 300):
+    rows = audit_rows(days, actor, q, limit)
+    with conn() as c:
+        kinds = [r["actor"] for r in c.execute("SELECT DISTINCT actor FROM audit ORDER BY actor")]
+    return {"rows": rows, "actors": kinds, "keep_days": AUDIT_KEEP_DAYS}
+
+@app.get("/api/audit.csv", dependencies=[Depends(auth)])
+async def audit_csv(days: int = 90, actor: str = "", q: str = ""):
+    buf = io.StringIO(); w = csv.writer(buf)
+    w.writerow(["data_hora", "perfil", "pessoa", "acao", "alvo", "status", "ip"])
+    for r in audit_rows(days, actor, q, 5000):
+        w.writerow([datetime.fromtimestamp(r["ts"], TZ).strftime("%Y-%m-%d %H:%M:%S"), r["actor"], r["actor_name"], r["action"], r["target"], r["status"], r["ip"]])
+    return Response(content="﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": "attachment; filename=auditoria.csv"})
+
+def mgr_audit_scope(m):
+    """O gestor vê as ações dele e as dos atendentes dele; nada do administrador nem de outros gestores."""
+    return ("(actor='gestor' AND actor_id=?) OR (actor='atendente' AND actor_id IN (SELECT id FROM agents WHERE manager_id=?))", [m["id"], m["id"]])
+
+@app.get("/api/gestor/audit")
+async def gestor_audit(days: int = 30, q: str = "", x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    return {"rows": audit_rows(days, "", q, 300, mgr_audit_scope(m))}
+
+# ======================================================================
+# v18: etiquetas, filtros e quadro (kanban) por etapa
+# ======================================================================
+STAGES = [("novo", "Novo"), ("contatado", "Contatado"), ("qualificando", "Qualificando"), ("qualificado", "Qualificado"), ("encaminhado", "Encaminhado"),
+          ("reuniao_agendada", "Reunião agendada"), ("humano", "Com a equipe"), ("sem_resposta", "Sem resposta"), ("descartado", "Descartado")]
+STAGE_IDS = {k for k, _ in STAGES}
+TAG_COLORS = {"verde": "#25d366", "azul": "#3b82f6", "amarelo": "#eab308", "laranja": "#f97316", "vermelho": "#ef4444", "roxo": "#8b5cf6", "rosa": "#ec4899", "cinza": "#94a3b8"}
+
+def migrate_v18():
+    with conn() as c:
+        new = not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tags'").fetchone()
+        c.executescript("""CREATE TABLE IF NOT EXISTS tags(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, color TEXT DEFAULT 'cinza', created REAL);
+            CREATE TABLE IF NOT EXISTS lead_tags(phone TEXT, tag_id INTEGER, PRIMARY KEY(phone, tag_id));
+            CREATE INDEX IF NOT EXISTS ix_lead_tags_tag ON lead_tags(tag_id);""")
+        if new:      # etiquetas de partida (podem ser editadas ou apagadas)
+            for n, col in (("Quente", "vermelho"), ("Morno", "laranja"), ("Frio", "azul"), ("Cliente", "verde"), ("Retornar", "amarelo")):
+                c.execute("INSERT INTO tags(name,color,created) VALUES(?,?,?)", (n, col, time.time()))
+migrate_v18()
+
+def tag_list():
+    with conn() as c:
+        return [dict(r) for r in c.execute("SELECT t.id,t.name,t.color,(SELECT COUNT(*) FROM lead_tags lt WHERE lt.tag_id=t.id) AS leads FROM tags t ORDER BY t.name")]
+
+def lead_tag_map():
+    out = defaultdict(list)
+    with conn() as c:
+        for r in c.execute("SELECT phone, tag_id FROM lead_tags ORDER BY tag_id"):
+            out[r["phone"]].append(r["tag_id"])
+    return out
+
+class TagIn(BaseModel):
+    name: str = ""
+    color: str = "cinza"
+
+class LeadTagsIn(BaseModel):
+    tags: list = []
+
+class StageIn(BaseModel):
+    stage: str = ""
+
+@app.get("/api/tags", dependencies=[Depends(auth)])
+async def tags_get():
+    return {"tags": tag_list(), "colors": TAG_COLORS, "stages": STAGES}
+
+def _tag_clean(b):
+    name = re.sub(r"\s+", " ", (b.name or "").strip())[:30]
+    if not name:
+        raise HTTPException(400, "Dê um nome à etiqueta")
+    return name, (b.color if b.color in TAG_COLORS else "cinza")
+
+@app.post("/api/tags", dependencies=[Depends(auth)])
+async def tags_add(b: TagIn):
+    name, col = _tag_clean(b)
+    try:
+        with conn() as c:
+            cur = c.execute("INSERT INTO tags(name,color,created) VALUES(?,?,?)", (name, col, time.time()))
+    except sqlite3.IntegrityError:
+        raise HTTPException(400, "Já existe uma etiqueta com este nome")
+    return {"ok": True, "id": cur.lastrowid}
+
+@app.put("/api/tags/{tid}", dependencies=[Depends(auth)])
+async def tags_put(tid: int, b: TagIn):
+    name, col = _tag_clean(b)
+    try:
+        with conn() as c:
+            if not c.execute("SELECT 1 FROM tags WHERE id=?", (tid,)).fetchone():
+                raise HTTPException(404, "Etiqueta não encontrada")
+            c.execute("UPDATE tags SET name=?, color=? WHERE id=?", (name, col, tid))
+    except sqlite3.IntegrityError:
+        raise HTTPException(400, "Já existe uma etiqueta com este nome")
+    return {"ok": True}
+
+@app.delete("/api/tags/{tid}", dependencies=[Depends(auth)])
+async def tags_del(tid: int):
+    with conn() as c:
+        if not c.execute("SELECT 1 FROM tags WHERE id=?", (tid,)).fetchone():
+            raise HTTPException(404, "Etiqueta não encontrada")
+        c.execute("DELETE FROM lead_tags WHERE tag_id=?", (tid,))
+        c.execute("DELETE FROM tags WHERE id=?", (tid,))
+    return {"ok": True}
+
+def set_lead_tags(phone, ids):
+    """Troca o conjunto de etiquetas do lead (só ids que existem)."""
+    clean = []
+    for x in ids or []:
+        try:
+            clean.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    with conn() as c:
+        valid = {r["id"] for r in c.execute("SELECT id FROM tags")}
+        keep = [i for i in dict.fromkeys(clean) if i in valid][:12]
+        c.execute("DELETE FROM lead_tags WHERE phone=?", (phone,))
+        for i in keep:
+            c.execute("INSERT INTO lead_tags(phone,tag_id) VALUES(?,?)", (phone, i))
+    return keep
+
+@app.put("/api/leads/{phone}/tags", dependencies=[Depends(auth)])
+async def lead_tags_put(phone: str, b: LeadTagsIn):
+    if not get_lead(phone):
+        raise HTTPException(404, "Lead não encontrado")
+    return {"ok": True, "tags": set_lead_tags(phone, b.tags)}
+
+def move_stage(phone, stage):
+    """Mudança manual de etapa (arrastar no quadro). 'Com a equipe' envia à fila de atendimento; sair dele devolve a conversa à IA."""
+    lead = get_lead(phone)
+    if not lead:
+        raise HTTPException(404, "Lead não encontrado")
+    if stage not in STAGE_IDS:
+        raise HTTPException(400, "Etapa desconhecida")
+    if lead["stage"] == stage:
+        return {"ok": True, "stage": stage}
+    if stage == "humano":
+        handoff_begin(phone, "movida para a equipe no quadro", "quadro")
+        return {"ok": True, "stage": "humano", "handoff": True}
+    kw = {"stage": stage}
+    if lead["human"]:
+        kw.update(human=0, agent_id=None, assigned_at=None)
+    set_lead(phone, **kw)
+    log("funil", f"{phone}: etapa alterada manualmente para {stage}")
+    return {"ok": True, "stage": stage}
+
+@app.post("/api/leads/{phone}/stage", dependencies=[Depends(auth)])
+async def lead_stage(phone: str, b: StageIn):
+    r = move_stage(phone, b.stage)
+    if r.get("handoff"):
+        await handoff_sweep()
+    return r
+
+@app.put("/api/agent/leads/{phone}/tags")
+async def agent_lead_tags(phone: str, b: LeadTagsIn, x_token: str = Header(default="")):
+    a = agent_from_token(x_token)
+    _agent_lead(phone, a, allow_queue=True)
+    return {"ok": True, "tags": set_lead_tags(phone, b.tags)}
+
+@app.put("/api/gestor/leads/{phone}/tags")
+async def gestor_lead_tags(phone: str, b: LeadTagsIn, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_lead(m, phone)
+    return {"ok": True, "tags": set_lead_tags(phone, b.tags)}
+
+@app.post("/api/gestor/leads/{phone}/stage")
+async def gestor_lead_stage(phone: str, b: StageIn, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_lead(m, phone)
+    r = move_stage(phone, b.stage)
+    if r.get("handoff"):
+        await handoff_sweep()
+    return r
+
+
+# ---------- roteiros (menu de opções) e resposta fora do horário ----------
+FLOW_TRIGGERS = {"first": "Primeira mensagem do contato", "keyword": "Palavra-chave", "ooh": "Fora do horário da equipe"}
+FLOW_ACTIONS = {"text": "Responder um texto", "handoff": "Chamar a equipe", "niche": "Mudar de nicho", "tag": "Colocar etiqueta", "ai": "Seguir com a IA"}
+
+def migrate_v19():
+    with conn() as c:
+        c.executescript("""CREATE TABLE IF NOT EXISTS flows(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, trigger TEXT, keywords TEXT DEFAULT '',
+            message TEXT, options TEXT DEFAULT '[]', stop_ai INTEGER DEFAULT 1, active INTEGER DEFAULT 1, created REAL);""")
+        cols = {r[1] for r in c.execute("PRAGMA table_info(leads)")}
+        if "flow_step" not in cols:
+            c.execute("ALTER TABLE leads ADD COLUMN flow_step TEXT")
+migrate_v19()
+
+def flow_row(r):
+    d = dict(r)
+    try:
+        d["options"] = json.loads(d.get("options") or "[]")
+    except ValueError:
+        d["options"] = []
+    d["keywords"] = [k for k in (d.get("keywords") or "").split(",") if k.strip()]
+    return d
+
+def flow_list(only_active=False):
+    with conn() as c:
+        rows = c.execute("SELECT * FROM flows" + (" WHERE active=1" if only_active else "") + " ORDER BY id").fetchall()
+    return [flow_row(r) for r in rows]
+
+def flow_menu_text(f):
+    t = (f["message"] or "").strip()
+    if f["options"]:
+        t += "\n\n" + "\n".join(f"{i}) {o['label']}" for i, o in enumerate(f["options"], 1))
+    return t[:1500]
+
+def flow_match_option(f, text):
+    t = norm(text).strip(" .!)")
+    if t.isdigit() and 1 <= int(t) <= len(f["options"]):
+        return f["options"][int(t) - 1]
+    for o in f["options"]:
+        if norm(o["label"]) == t:
+            return o
+    return None
+
+def _flow_niche(value):
+    with conn() as c:
+        r = None
+        if str(value).isdigit():
+            r = c.execute("SELECT id FROM niches WHERE id=?", (int(value),)).fetchone()
+        if not r:
+            r = c.execute("SELECT id FROM niches WHERE lower(name)=lower(?)", (str(value),)).fetchone()
+    return r["id"] if r else None
+
+async def flow_run_option(phone, f, o, send):
+    """Executa a opção escolhida. Devolve True quando a IA não deve responder agora."""
+    act, val = o["action"], (o.get("value") or "").strip()
+    if act == "text":
+        await reply_to(phone, val or "Ok!", send=send, humanize=False)
+        return True
+    if act == "handoff":
+        if val:
+            await reply_to(phone, val, send=send, humanize=False)
+        handoff_begin(phone, f"roteiro «{f['name']}»: {o['label']}", "roteiro")
+        await handoff_sweep()
+        return True
+    if act == "niche":
+        nid_ = _flow_niche(val)
+        if nid_:
+            set_lead(phone, niche_id=nid_)
+        return False
+    if act == "tag":
+        with conn() as c:
+            t = c.execute("SELECT id FROM tags WHERE lower(name)=lower(?)", (val,)).fetchone()
+        if t:
+            with conn() as c:
+                cur_ = [r["tag_id"] for r in c.execute("SELECT tag_id FROM lead_tags WHERE phone=?", (phone,))]
+            set_lead_tags(phone, sorted(set(cur_ + [t["id"]])))
+        return False
+    return False
+
+async def flow_engine(phone, text, send=True):
+    """Roda antes da IA. True = o roteiro respondeu e a IA não precisa falar agora."""
+    lead = get_lead(phone)
+    if not lead:
+        return False
+    if lead["flow_step"]:                       # o contato estava escolhendo no menu
+        try:
+            fid = int(json.loads(lead["flow_step"]).get("id"))
+        except Exception:
+            fid = 0
+        set_lead(phone, flow_step=None)
+        f = next((x for x in flow_list() if x["id"] == fid), None)
+        if f:
+            o = flow_match_option(f, text)
+            if o:
+                log("roteiro", f"{phone}: «{f['name']}» → {o['label']}")
+                return await flow_run_option(phone, f, o, send)
+        return False                            # não era uma das opções: a IA conversa normalmente
+    flows = flow_list(only_active=True)
+    if not flows:
+        return False
+    cfg = hours_cfg(); outside = cfg["enabled"] and not in_hours(cfg=cfg)
+    nt = norm(text)
+    with conn() as c:
+        n_lead = c.execute("SELECT COUNT(*) n FROM messages WHERE phone=? AND role='lead'", (phone,)).fetchone()["n"]
+    pick = next((f for f in flows if f["trigger"] == "keyword" and any(norm(k) in nt for k in f["keywords"])), None)
+    if not pick and outside and not (lead["ooh_sent_at"] and time.time() - lead["ooh_sent_at"] < OOH_REPEAT_S):
+        pick = next((f for f in flows if f["trigger"] == "ooh"), None)
+        if pick:
+            set_lead(phone, ooh_sent_at=time.time())
+    if not pick and n_lead <= 1:
+        pick = next((f for f in flows if f["trigger"] == "first"), None)
+    if not pick:
+        return False
+    n = next_open(cfg=cfg)
+    msg = flow_menu_text(pick).replace("{horario}", hours_text(cfg)).replace("{volta}", n.strftime("%d/%m às %H:%M") if n else "")
+    await reply_to(phone, msg, send=send, humanize=False)
+    log("roteiro", f"{phone}: roteiro «{pick['name']}» enviado")
+    if pick["options"]:
+        set_lead(phone, flow_step=json.dumps({"id": pick["id"]}))
+        return True
+    return bool(pick["stop_ai"])
+
+def flow_clean(b):
+    name = str(b.get("name") or "").strip()[:60]
+    trig = b.get("trigger")
+    if not name:
+        raise HTTPException(400, "Dê um nome ao roteiro")
+    if trig not in FLOW_TRIGGERS:
+        raise HTTPException(400, "Gatilho inválido")
+    kws = [k.strip().lower()[:40] for k in (b.get("keywords") if isinstance(b.get("keywords"), list) else str(b.get("keywords") or "").split(",")) if k.strip()][:12]
+    if trig == "keyword" and not kws:
+        raise HTTPException(400, "Informe ao menos uma palavra-chave")
+    msg = str(b.get("message") or "").strip()[:900]
+    if not msg:
+        raise HTTPException(400, "Escreva a mensagem do roteiro")
+    opts = []
+    for o in (b.get("options") or [])[:8]:
+        lab, act = str(o.get("label") or "").strip()[:40], o.get("action")
+        if not lab:
+            continue
+        if act not in FLOW_ACTIONS:
+            raise HTTPException(400, f"Ação inválida na opção «{lab}»")
+        val = str(o.get("value") or "").strip()[:600]
+        if act == "text" and not val:
+            raise HTTPException(400, f"A opção «{lab}» precisa de um texto de resposta")
+        if act == "niche" and not _flow_niche(val):
+            raise HTTPException(400, f"Nicho «{val}» não existe (na opção «{lab}»)")
+        if act == "tag":
+            with conn() as c:
+                if not c.execute("SELECT 1 FROM tags WHERE lower(name)=lower(?)", (val,)).fetchone():
+                    raise HTTPException(400, f"Etiqueta «{val}» não existe (na opção «{lab}»)")
+        opts.append({"label": lab, "action": act, "value": val})
+    return name, trig, ",".join(kws), msg, json.dumps(opts, ensure_ascii=False), 1 if b.get("stop_ai", True) else 0, 1 if b.get("active", True) else 0
+
+@app.get("/api/flows", dependencies=[Depends(auth)])
+async def flows_get():
+    return {"flows": flow_list(), "triggers": FLOW_TRIGGERS, "actions": FLOW_ACTIONS}
+
+@app.post("/api/flows", dependencies=[Depends(auth)])
+async def flows_post(b: dict):
+    v = flow_clean(b)
+    with conn() as c:
+        if c.execute("SELECT COUNT(*) n FROM flows").fetchone()["n"] >= 30:
+            raise HTTPException(400, "Limite de 30 roteiros")
+        fid = c.execute("INSERT INTO flows(name,trigger,keywords,message,options,stop_ai,active,created) VALUES(?,?,?,?,?,?,?,?)", (*v, time.time())).lastrowid
+    return {"ok": True, "id": fid}
+
+@app.put("/api/flows/{fid}", dependencies=[Depends(auth)])
+async def flows_put(fid: int, b: dict):
+    v = flow_clean(b)
+    with conn() as c:
+        if not c.execute("SELECT 1 FROM flows WHERE id=?", (fid,)).fetchone():
+            raise HTTPException(404, "Roteiro não encontrado")
+        c.execute("UPDATE flows SET name=?,trigger=?,keywords=?,message=?,options=?,stop_ai=?,active=? WHERE id=?", (*v, fid))
+    return {"ok": True}
+
+@app.delete("/api/flows/{fid}", dependencies=[Depends(auth)])
+async def flows_del(fid: int):
+    with conn() as c:
+        c.execute("DELETE FROM flows WHERE id=?", (fid,))
+        c.execute("UPDATE leads SET flow_step=NULL WHERE flow_step LIKE ?", ('%"id": ' + str(int(fid)) + '}',))
+    return {"ok": True}

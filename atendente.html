@@ -43,6 +43,8 @@ section.chat{background:var(--bg)}aside.info{border-right:0;border-left:1px soli
 .bar{display:flex;gap:8px;padding:10px;background:var(--card);border-top:1px solid var(--bd)}
 .bar textarea{resize:none;height:44px}
 .info h3{margin:6px 0 2px;font-size:13px;color:var(--mut);text-transform:uppercase}.kv{display:flex;justify-content:space-between;gap:8px;font-size:14px;border-bottom:1px dashed var(--bd);padding:3px 0}.kv span:first-child{color:var(--mut)}
+.tg{font-size:11px;padding:1px 8px;border-radius:99px;margin:3px 4px 0 0;display:inline-block;color:var(--tx);border:1px solid var(--tc,#94a3b8);background:color-mix(in srgb,var(--tc,#94a3b8) 22%,transparent)}.tg.off{opacity:.45;background:transparent}button.tg{cursor:pointer;font:inherit;font-size:11px;font-weight:500;padding:1px 8px}
+.lfa{padding:6px 10px;border-bottom:1px solid var(--bd)}.lfa input{padding:6px 8px;font-size:13px}
 .empty{margin:auto;color:var(--mut);padding:24px;text-align:center}
 .back{display:none}
 @media (max-width:900px){main{grid-template-columns:1fr}aside.info{display:none}section.chat,aside.lst{grid-area:1/1}main.inchat aside.lst{display:none}main:not(.inchat) section.chat{display:none}.back{display:inline-block}}
@@ -67,7 +69,7 @@ section.chat{background:var(--bg)}aside.info{border-right:0;border-left:1px soli
   <button class="g" id="pushb">Ativar avisos</button><button class="g" id="avail"></button><button class="g" id="out">Sair</button>
  </header>
  <main id="mn">
-  <aside class="lst"><div class="lh">Na fila <span id="cq"></span></div><div class="list" id="ql" style="flex:none;max-height:38%"></div>
+  <aside class="lst"><div class="lfa"><input id="lq" placeholder="Buscar nome ou telefone"></div><div class="lh">Na fila <span id="cq"></span></div><div class="list" id="ql" style="flex:none;max-height:38%"></div>
    <div class="lh">Meus atendimentos <span id="cm"></span></div><div class="list" id="ml"></div></aside>
   <section class="chat">
    <div class="ch" id="chh"><button class="g back" id="bk">←</button><span id="cav"></span><b id="cnm">Selecione uma conversa</b><span class="sp"></span>
@@ -111,18 +113,18 @@ function head(q){$("who").textContent=ME.name;$("dot").classList.toggle("on",ME.
  const fmt=s=>s==null?"—":s<90?s+" s":s<5400?Math.round(s/60)+" min":(s/3600).toFixed(1)+" h";
  $("qn").textContent=(q??0)+" na fila"+(HRS&&HRS.enabled?(HRS.open_now?" · dentro do expediente":" · fora do expediente"+(HRS.next_open?" (abre "+HRS.next_open+")":"")):"")+(ST?` · 7 dias: ${ST.handled} atendida(s), 1ª resposta ${fmt(ST.first_reply_s)}`:"")}
 async function poll(force){
- try{const [l,m]=await Promise.all([api("/api/agent/leads"),api("/api/agent/me")]);ME=m.agent;TEAM=m.team;HRS=m.hours;ST=m.stats7;LEADS=l.leads;head(m.queue);
+ try{const [l,m]=await Promise.all([api("/api/agent/leads"),api("/api/agent/me")]);ME=m.agent;TEAM=m.team;HRS=m.hours;ST=m.stats7;LEADS=l.leads;TAGS=l.tags||[];head(m.queue);
   const mine=LEADS.filter(x=>x.agent_id==ME.id),q=LEADS.filter(x=>x.agent_id==null);
   if(prevQ>=0&&q.length>prevQ)beep();prevQ=q.length;
   mine.forEach(x=>{if((prevUnread[x.phone]??0)<x.unread&&x.phone!=cur)beep();prevUnread[x.phone]=x.unread});
   const tot=mine.reduce((a,x)=>a+(x.unread||0),0)+q.length;document.title=(tot?`(${tot}) `:"")+"Atendimento";
-  const sig=JSON.stringify([LEADS.map(x=>[x.phone,x.agent_id,x.unread,x.last_ts]),cur,ME.available,TEAM.map(t=>t.id+t.online)]);
+  const sig=JSON.stringify([LEADS.map(x=>[x.phone,x.agent_id,x.unread,x.last_ts,x.tags]),cur,ME.available,TEAM.map(t=>t.id+t.online)]);
   if(force||sig!=lastSig){lastSig=sig;render()}
   if(cur)await loadChat()}catch(e){}}
 let HRS=null,ST=null,QUICK=[];
 function item(x){const unread=x.unread?`<span class="bd ${x.agent_id==null?"q":""}">${x.unread}</span>`:"";
- return`<div class="it ${x.phone==cur?"sel":""}" data-p="${x.phone}">${av(x.phone,x.name||x.phone)}<div class="t"><b>${esc(x.name||x.phone)}</b><small>${esc((x.last_text||"").slice(0,70))}</small></div>${unread}</div>`}
-function render(){const mine=LEADS.filter(x=>x.agent_id==ME.id),q=LEADS.filter(x=>x.agent_id==null);
+ return`<div class="it ${x.phone==cur?"sel":""}" data-p="${x.phone}">${av(x.phone,x.name||x.phone)}<div class="t"><b>${esc(x.name||x.phone)}</b><small>${esc((x.last_text||"").slice(0,70))}</small>${tagChips(x.tags)}</div>${unread}</div>`}
+function render(){const fq=($('lq').value||'').toLowerCase().trim(),vis=x=>!fq||[x.name,x.phone,x.company].some(v=>String(v||'').toLowerCase().includes(fq));const mine=LEADS.filter(x=>x.agent_id==ME.id&&vis(x)),q=LEADS.filter(x=>x.agent_id==null&&vis(x));
  $("cq").textContent=q.length?`(${q.length})`:"";$("cm").textContent=mine.length?`(${mine.length})`:"";
  $("ql").innerHTML=q.map(item).join("")||'<div class="note" style="padding:10px 12px">Ninguém esperando.</div>';
  $("ml").innerHTML=mine.map(item).join("")||'<div class="note" style="padding:10px 12px">Nenhuma conversa com você.</div>';
@@ -134,8 +136,8 @@ function render(){const mine=LEADS.filter(x=>x.agent_id==ME.id),q=LEADS.filter(x
  info(L)}
 function info(L){if(!L){$("inf").innerHTML="";return}let b={};try{b=JSON.parse(L.bant||"{}")}catch(e){}
  const rows=[["Nicho",L.niche||"—"],["Telefone",L.phone],["Estágio",L.stage],...Object.entries(b).map(([k,v])=>[k.replace(/_/g," "),typeof v=="object"?JSON.stringify(v):v]),["Reunião",L.meeting||"—"]];
- $("inf").innerHTML=`<h3>Motivo da transferência</h3><div>${esc(L.handoff_reason||"—")}</div><h3>Dados do lead</h3>`+rows.map(([a,v])=>`<div class="kv"><span>${esc(a)}</span><span>${esc(v)}</span></div>`).join("")+`<h3>Notas internas</h3><div class="note">Só a equipe vê. Nunca vão para o lead.</div><div id="nl"></div><textarea id="nt" rows="3" placeholder="Anotar algo sobre este lead…"></textarea><button class="g" id="nadd">Salvar nota</button>`;
- $("nt").value=window._nd&&window._ndp==L.phone?window._nd:"";$("nt").oninput=()=>{window._nd=$("nt").value;window._ndp=L.phone};
+ $("inf").innerHTML=`<h3>Etiquetas</h3><div id="tgs"></div><h3>Motivo da transferência</h3><div>${esc(L.handoff_reason||"—")}</div><h3>Dados do lead</h3>`+rows.map(([a,v])=>`<div class="kv"><span>${esc(a)}</span><span>${esc(v)}</span></div>`).join("")+`<h3>Notas internas</h3><div class="note">Só a equipe vê. Nunca vão para o lead.</div><div id="nl"></div><textarea id="nt" rows="3" placeholder="Anotar algo sobre este lead…"></textarea><button class="g" id="nadd">Salvar nota</button>`;
+ renderLeadTags(L);$("nt").value=window._nd&&window._ndp==L.phone?window._nd:"";$("nt").oninput=()=>{window._nd=$("nt").value;window._ndp=L.phone};
  $("nadd").onclick=async()=>{const t=$("nt").value.trim();if(!t)return;try{await api("/api/agent/notes/"+L.phone,{text:t});$("nt").value="";window._nd="";loadNotes(L.phone)}catch(e){alert(e.message)}};loadNotes(L.phone)}
 async function loadNotes(p){try{const n=await api("/api/agent/notes/"+p);if(p!=cur||!$("nl"))return;$("nl").innerHTML=n.map(x=>`<div class="kv" style="display:block"><b>${esc(x.author)}</b> <small class="note">${new Date(x.ts*1e3).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</small><br>${esc(x.text)}</div>`).join("")||'<div class="note">Nenhuma nota.</div>'}catch(e){}}
 async function loadQuick(){try{QUICK=await api("/api/agent/quick");$("qr").innerHTML='<option value="">Respostas rápidas…</option>'+QUICK.map((q,i)=>`<option value="${i}">${esc(q.title)}</option>`).join("");$("qr").classList.toggle("hide",!QUICK.length)}catch(e){}}
@@ -146,6 +148,7 @@ async function loadChat(scroll){if(!cur)return;const L=LEADS.find(x=>x.phone==cu
  $("msgs").innerHTML=m.map(x=>{const lead=x.role=="lead",who=lead?(L.name||L.phone):(x.role=="humano"?(x.agent||"Atendente"):"Assistente virtual (IA)");
   return`<div class="mrow ${lead?"l":"s"}">${lead?av(L.phone,L.name||L.phone,"sm"):`<span class="av sm" data-i="${esc(x.role=="humano"?ini(x.agent||"A"):"IA")}" style="--c:${col(who)}" aria-hidden="true"></span>`}<div class="msg"><small class="note">${esc(who)}</small><br>${esc(x.text)}<time>${new Date(x.ts*1e3).toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})}</time></div></div>`}).join("");
  $("msgs").scrollTop=1e9}
+$("lq").oninput=()=>{lastSig="";render()};
 $("claim").onclick=async()=>{try{await api("/api/agent/claim/"+cur,{});await poll(true)}catch(e){alert(e.message);await poll(true)}};
 async function send(){const t=$("mi").value.trim();if(!t||!cur)return;$("mi").value="";try{await api("/api/agent/send/"+cur,{text:t});window._ms="";await poll(true)}catch(e){alert(e.message);$("mi").value=t}}
 $("snd").onclick=send;$("mi").onkeydown=e=>{if(e.key=="Enter"&&!e.shiftKey){e.preventDefault();send()}};
@@ -156,6 +159,13 @@ $("bk").onclick=()=>{$("mn").classList.remove("inchat")};
 $("files").onclick=async()=>{try{const fs=await api("/api/agent/files/"+cur);if(!fs.length){alert("Este lead não enviou arquivos.");return}
  const n=prompt("Arquivos recebidos (digite o número para abrir):\n"+fs.map((f,i)=>`${i+1}. ${f.name}`).join("\n"),"1");const f=fs[(parseInt(n)||0)-1];if(!f)return;
  const r=await fetch(`/api/agent/file/${cur}/${encodeURIComponent(f.name)}`,{headers:{"X-Token":TK}});if(!r.ok)throw new Error("Não foi possível abrir");window.open(URL.createObjectURL(await r.blob()),"_blank")}catch(e){alert(e.message)}};
+// etiquetas
+let TAGS=[];const TCOL={verde:"#25d366",azul:"#3b82f6",amarelo:"#eab308",laranja:"#f97316",vermelho:"#ef4444",roxo:"#8b5cf6",rosa:"#ec4899",cinza:"#94a3b8"};
+const tagOf=id=>TAGS.find(t=>t.id==id);
+function tagChips(ids){return (ids||[]).map(tagOf).filter(Boolean).map(t=>`<span class="tg" style="--tc:${TCOL[t.color]||"#94a3b8"}">${esc(t.name)}</span>`).join("")}
+function renderLeadTags(L){const box=$("tgs");if(!box)return;if(!TAGS.length){box.innerHTML='<div class="note">Nenhuma etiqueta cadastrada.</div>';return}
+ box.innerHTML=TAGS.map(t=>`<button type="button" class="tg ${(L.tags||[]).includes(t.id)?"":"off"}" style="--tc:${TCOL[t.color]||"#94a3b8"}" data-t="${t.id}">${esc(t.name)}</button>`).join("");
+ box.querySelectorAll("button").forEach(b=>b.onclick=async()=>{const id=+b.dataset.t,st=new Set(L.tags||[]);st.has(id)?st.delete(id):st.add(id);try{const r=await api("/api/agent/leads/"+L.phone+"/tags",{tags:[...st]},"PUT");L.tags=r.tags;renderLeadTags(L);lastSig="";render()}catch(e){alert(e.message)}})}
 // app no celular: instalar na tela inicial e receber avisos
 const PFX="/api/agent";let SWR=null;
 function b2u(s){const p="=".repeat((4-s.length%4)%4),r=atob((s+p).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...r].map(c=>c.charCodeAt(0)))}

@@ -17,6 +17,12 @@ main{display:grid;gap:12px;padding:12px;height:calc(100vh - 56px);min-height:560
 .col h2{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0;padding:10px 12px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center;gap:8px}
 .scroll{overflow:auto;flex:1;min-height:0}
 .item{padding:10px 12px;border-bottom:1px solid var(--bd);cursor:pointer}.item.sel{background:var(--bg)}.item small{color:var(--mut)}
+.tg{font-size:11px;padding:1px 8px;border-radius:99px;margin:4px 4px 0 0;display:inline-block;color:var(--tx);border:1px solid var(--tc,#94a3b8);background:color-mix(in srgb,var(--tc,#94a3b8) 22%,transparent)}.tg.off{opacity:.45;background:transparent}button.tg{cursor:pointer;font:inherit;font-size:11px}
+.lf{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:8px 10px;border-bottom:1px solid var(--bd)}.lf input{grid-column:1/3}.lf select,.lf input{padding:6px 8px;font-size:13px}
+.kb{display:flex;gap:10px;overflow:auto;align-items:flex-start;padding:12px;height:calc(100vh - 210px)}.kcol{flex:0 0 240px;background:var(--card);border:1px solid var(--bd);border-radius:12px;display:flex;flex-direction:column;max-height:100%}.kcol.over{outline:2px dashed var(--ac)}
+.kcol h3{margin:0;padding:10px 12px;font-size:13px;display:flex;justify-content:space-between;border-bottom:1px solid var(--bd)}.kcards{overflow:auto;padding:8px;display:grid;gap:8px;min-height:40px}
+.kcard{background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:8px 10px;cursor:grab}.kcard:active{cursor:grabbing}.kcard b{display:block}.kcard small{color:var(--mut)}.kcard.drag{opacity:.4}
+.tgs{padding:8px 12px;border-bottom:1px solid var(--bd)}
 .tag{font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid var(--bd);margin:4px 4px 0 0;display:inline-block;color:var(--mut)}
 .tag.q{color:var(--ok);border-color:var(--ok)}.tag.h{color:var(--wr);border-color:var(--wr)}
 #chat{background:var(--chat);padding:12px;display:flex;flex-direction:column;gap:6px}
@@ -57,19 +63,19 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 @media(max-width:900px){main{height:auto}#v1,#v2,#v4,#v5,#v6,#v7,#v8{grid-template-columns:1fr}.col{min-height:420px}.fr{grid-template-columns:110px 1fr 90px}}
 </style></head><body>
 <header><h1>SDR WhatsApp</h1>
-<button class="tab on" id="t1">Conversas</button><button class="tab" id="t2">Agentes (nichos)</button><button class="tab" id="t3">Envio e conexão</button><button class="tab" id="t4">Funil</button><button class="tab" id="t5">Avisos</button><button class="tab" id="t6">Retomada</button><button class="tab" id="t7">Custos</button><button class="tab" id="t8">Integrações</button><span class="sp"></span>
+<button class="tab on" id="t1">Conversas</button><button class="tab" id="t2">Agentes (nichos)</button><button class="tab" id="t3">Envio e conexão</button><button class="tab" id="t4">Funil</button><button class="tab" id="t5">Avisos</button><button class="tab" id="t6">Retomada</button><button class="tab" id="t7">Custos</button><button class="tab" id="t9">Quadro</button><button class="tab" id="t8">Integrações</button><span class="sp"></span>
 <span class="pill wait hide" id="pw"></span><span class="pill" id="pc" style="cursor:pointer">Conexão: …</span><span class="pill" id="pm">Modelo: …</span><span class="pill" id="pdg" style="cursor:pointer" title="Confere chave do Claude, WhatsApp, áudio, vídeo, avisos, backup e mais">Verificar instalação</span></header>
 <div id="opn" class="hide" role="status" style="padding:8px 16px;font-size:13px;border-bottom:1px solid var(--bd)"></div>
 
 <main id="v1">
-<section class="col"><h2>Leads <button id="open">Disparar</button></h2><div class="scroll" id="leads"></div></section>
+<section class="col"><h2>Leads <button id="open">Disparar</button></h2><div class="lf"><input type="text" id="lf_q" placeholder="Buscar por nome, telefone ou empresa"><select id="lf_s"><option value="">Todas as etapas</option></select><select id="lf_t"><option value="">Todas as etiquetas</option></select></div><div class="scroll" id="leads"></div></section>
 <section class="col"><h2><span id="ct">Conversa</span><span><button class="g" id="fb" style="display:none">Arquivos</button> <button class="g" id="lx" style="display:none">Exportar dados</button> <button class="d" id="ld" style="display:none">Apagar dados</button> <button class="g" id="tk" style="display:none"></button> <button class="g" id="tq" style="display:none" title="Coloca a conversa na fila da equipe (atendentes logados)">Enviar à equipe</button></span></h2>
 <div class="scroll" id="chat"></div>
 <details id="ndet" style="padding:4px 12px;border-top:1px solid var(--bd)"><summary class="note" style="cursor:pointer">Notas internas <span id="ndn"></span> — só a equipe vê, nunca vão ao lead</summary><div id="ndl"></div><div class="row"><input type="text" id="ndi" placeholder="Anotar algo sobre este lead…"><button class="g" id="ndadd">Salvar nota</button></div></details>
 <div class="bar"><select id="qrd" style="width:auto;max-width:150px;display:none"><option value="">Respostas rápidas…</option></select><div class="emop hide" id="emop"><div class="emt" id="emt"></div><div class="emg" id="emg"></div></div><button class="g" id="emo" title="Emojis" style="font-size:16px;padding:6px 10px">😊</button><input type="text" class="f" id="mi" placeholder="Mensagem…"><button id="snd">Enviar como SDR</button>
 <span class="br"></span>
 <button id="sug" class="g" title="O Claude sugere a próxima mensagem; você edita e envia">Sugerir resposta</button><button id="sim" class="g" title="Simula o lead falando; nada é enviado ao WhatsApp">Testar como lead</button><button id="simf" class="g" title="Simula o lead enviando um PDF, JPG, áudio ou vídeo (testa a leitura e a transcrição)">Anexar arquivo (teste)</button><input type="file" id="ff" accept="image/*,application/pdf,audio/*,video/*,.ogg,.opus,.m4a,.mp3,.mp4,.3gp,.mov" class="hide"></div></section>
-<section class="col"><h2>Integração ao vivo</h2><div class="crm" id="crm"></div><div class="ocb hide" id="oc"></div><div class="scroll" id="log"></div></section>
+<section class="col"><h2>Integração ao vivo</h2><div class="crm" id="crm"></div><div class="tgs" id="tgs"></div><div class="ocb hide" id="oc"></div><div class="scroll" id="log"></div></section>
 </main>
 
 <main id="v2" class="hide">
@@ -181,6 +187,11 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
  <div class="note">Os avisos não saem se o lead for de teste. O WhatsApp de aviso passa pela mesma fila de conexão; no modo QR, o corretor precisa já ter conversado com o número ou salvá-lo nos contatos para evitar bloqueio. E-mail e Slack/Discord são configurados no arquivo .env (veja env.example).</div>
 </div></div></section>
 <section class="col"><h2>Aguardando atendimento</h2><div class="scroll"><div id="aw"></div>
+<h2 style="border-top:1px solid var(--bd)">Histórico de ações (auditoria) <span class="note" id="au_s"></span></h2><div class="form">
+ <div class="note">Quem fez o quê, quando e de qual IP: mudanças de configuração, disparos, respostas, transferências, entradas no painel e leitura de conversas. <b>O texto das mensagens não é guardado aqui.</b> Guardado por <span id="au_keep">365</span> dias. Ao apagar um lead (LGPD), o número dele some deste histórico.</div>
+ <div class="row" style="align-items:flex-end"><div style="flex:0 0 130px"><label>Período</label><select id="au_d"><option value="1">1 dia</option><option value="7" selected>7 dias</option><option value="30">30 dias</option><option value="90">90 dias</option></select></div>
+  <div style="flex:0 0 160px"><label>Perfil</label><select id="au_a"><option value="">Todos</option></select></div><div><label>Buscar</label><input type="text" id="au_q" placeholder="ação, pessoa ou lead"></div><button class="g" id="au_go">Atualizar</button><button class="g" id="au_csv">Baixar CSV</button></div>
+ <div id="au_list" style="max-height:360px;overflow:auto"></div></div>
 <h2 style="border-top:1px solid var(--bd)">Gestores de equipe <span class="note" id="gm_s"></span></h2><div class="form">
  <div class="note">Um gestor entra em <b id="gm_url"></b>, conecta o WhatsApp <b>dele</b> e cria a <b>própria equipe</b> de atendentes. Ele só vê as conversas dos números dele e só transfere para os atendentes dele. Você (administrador) continua vendo tudo. Os números dos gestores nunca são usados nos seus disparos. Cada número conectado por QR tem o mesmo risco de bloqueio do seu.</div>
  <div id="gm_list"></div>
@@ -200,6 +211,20 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
  <div id="hr_days"></div>
  <label>Mensagem fora do horário (<code>{horario}</code> e <code>{volta}</code> são preenchidos sozinhos)</label><textarea id="hr_msg" rows="2"></textarea>
  <div class="row" style="align-items:center"><button class="g" id="hr_save">Salvar horário</button><span class="note" id="hr_m"></span></div></div>
+<div style="border-top:1px solid var(--bd);margin-top:8px;padding-top:6px"><b>Roteiros e respostas automáticas</b>
+ <div class="note">Complemento da IA: menu de opções na 1ª mensagem, resposta por palavra-chave e aviso fora do horário. Se o contato escolher uma opção do menu, o roteiro age; se escrever outra coisa, a IA conversa.</div>
+ <div id="fl_list"></div>
+ <button class="g" id="fl_new" style="margin-top:6px">+ Novo roteiro</button>
+ <div id="fl_ed" class="hide form" style="margin-top:8px;border:1px solid var(--bd);border-radius:8px;padding:8px">
+  <label>Nome</label><input id="fl_name" maxlength="60">
+  <div class="grid2"><div><label>Quando dispara</label><select id="fl_trig"></select></div><div id="fl_kwb"><label>Palavras-chave (separe por vírgula)</label><input id="fl_kw" placeholder="preço, valor"></div></div>
+  <label>Mensagem (no fora do horário use <code>{horario}</code> e <code>{volta}</code>)</label><textarea id="fl_msg" rows="3" maxlength="900"></textarea>
+  <b style="font-size:13px">Opções do menu (opcional, até 8)</b><div id="fl_opts"></div>
+  <button class="g" id="fl_addopt" type="button">+ Opção</button>
+  <label style="display:flex;gap:6px;align-items:center;margin:6px 0"><input type="checkbox" id="fl_stop" checked> Sem opções: a IA fica quieta depois desta mensagem</label>
+  <label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="fl_act" checked> Roteiro ativo</label>
+  <datalist id="fl_dl"></datalist>
+  <div class="row" style="align-items:center"><button class="g" id="fl_save">Salvar roteiro</button><button class="g" id="fl_cancel">Cancelar</button><span class="note" id="fl_m"></span></div></div></div>
 <div style="border-top:1px solid var(--bd);margin-top:8px;padding-top:6px"><b>Respostas rápidas</b> <span class="note">use {nome} e {atendente}</span>
  <div id="qk_list"></div>
  <div class="row" style="align-items:flex-end"><div><label>Título</label><input type="text" id="qk_t" maxlength="60"></div><div style="flex:2"><label>Texto</label><input type="text" id="qk_b" maxlength="1500"></div><button class="g" id="qk_add">Adicionar</button></div><div class="note" id="qk_m"></div></div>
@@ -242,6 +267,12 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 <div class="note">Os preços padrão são só um ponto de partida: confira na página de preços da Anthropic para o seu modelo e ajuste aqui. Os avisos de 80% e 100% do orçamento vão para os canais da aba Avisos. Com "parar de responder", o lead continua sendo registrado e você pode responder pelo painel.</div></div></div></section>
 </main>
 
+<main id="v9" class="hide">
+<section class="col" style="grid-column:1/-1;min-width:0"><h2>Quadro de leads <span class="note" id="kb_n"></span></h2>
+ <div class="lf" style="grid-template-columns:2fr 1fr 1fr auto"><input type="text" id="kb_q" placeholder="Buscar por nome, telefone ou empresa" style="grid-column:auto"><select id="kb_t"><option value="">Todas as etiquetas</option></select><select id="kb_o"><option value="">Ativo e receptivo</option><option value="ativo">Só ativo</option><option value="receptivo">Só receptivo</option></select><button class="g" id="kb_tg">Gerenciar etiquetas</button></div>
+ <div class="hide" id="kb_mg" style="padding:10px 12px;border-bottom:1px solid var(--bd)"><div class="note">Arraste os cartões entre as colunas para mudar a etapa. Mover para <b>Com a equipe</b> envia à fila de atendimento; mover para <b>Descartado</b> coloca o contato na lista de supressão (nunca mais recebe mensagem); tirar de <b>Com a equipe</b> devolve a conversa à IA.</div><div id="tg_list"></div>
+  <div class="row" style="align-items:flex-end"><div><label>Nova etiqueta</label><input type="text" id="tg_name" maxlength="30"></div><div style="flex:0 0 130px"><label>Cor</label><select id="tg_col"></select></div><button class="g" id="tg_add">Adicionar</button></div><div class="note" id="tg_msg"></div></div>
+ <div class="kb" id="kb"></div></section></main>
 <main id="v8" class="hide">
 <section class="col"><h2>CRM e agenda <span class="note" id="is"></span></h2><div class="scroll"><div class="form">
  <div><label>Destino dos leads</label><select id="i_type"><option value="webhook">Webhook genérico (n8n, Make, Zapier, outro CRM)</option><option value="pipedrive">Pipedrive (conector pronto)</option><option value="hubspot">HubSpot (conector pronto)</option></select></div>
@@ -324,8 +355,8 @@ const nameOf=id=>(niches.find(n=>n.id==id)||{}).name||"";
 const pretty=k=>k.replace(/_/g," ").replace(/^./,c=>c.toUpperCase());
 
 // abas
-function tab(n){[1,2,3,4,5,6,7,8].forEach(i=>{$("v"+i).classList.toggle("hide",n!=i);$("t"+i).classList.toggle("on",n==i)});if(n==3)loadEnvio();if(n==4){loadFunil();loadOrders()}if(n==5)loadAvisos();if(n==6)loadRetomada();if(n==7)loadCustos();if(n==8){loadInteg();loadLgpd();loadPay()}}
-$("t1").onclick=()=>tab(1);$("t2").onclick=()=>tab(2);$("t3").onclick=()=>tab(3);[4,5,6,7,8].forEach(n=>$("t"+n).onclick=()=>tab(n));$("pw").onclick=()=>tab(5);$("pc").onclick=()=>tab(3);
+function tab(n){[1,2,3,4,5,6,7,8,9].forEach(i=>{$("v"+i).classList.toggle("hide",n!=i);$("t"+i).classList.toggle("on",n==i)});if(n==3)loadEnvio();if(n==4){loadFunil();loadOrders()}if(n==5)loadAvisos();if(n==6)loadRetomada();if(n==7)loadCustos();if(n==8){loadInteg();loadLgpd();loadPay()}if(n==9)loadBoard()}
+$("t1").onclick=()=>tab(1);$("t2").onclick=()=>tab(2);$("t3").onclick=()=>tab(3);[4,5,6,7,8,9].forEach(n=>$("t"+n).onclick=()=>tab(n));$("pw").onclick=()=>tab(5);$("pc").onclick=()=>tab(3);
 
 // nichos
 async function loadNiches(editor){niches=await api("/api/niches");if(ni==null||!niches.find(n=>n.id==ni))ni=(niches.find(n=>n.is_default)||niches[0]).id;
@@ -447,13 +478,13 @@ function meOf(line){const l=(linesData&&linesData.lines||[]).find(x=>x.id==(line
 async function tick(){
  if(!linesData&&!window._ll){window._ll=1;loadLines()}
  const leads=await api("/api/leads");window._leads=leads;if(!cur&&leads[0])cur=leads[0].phone;if($("ndet").open&&window._nc!=cur){window._nc=cur;loadNotesA()}
- $("leads").innerHTML=leads.map(l=>`<div class="item ${l.phone==cur?"sel":""}" data-p="${l.phone}">${av(l.phone,l.name||l.phone,"")}<b>${esc(l.name||l.phone)}</b>${l.test?" <span class='tag'>teste</span>":""}<br><small>${esc(l.company||l.phone)}</small><br><span class="tag ${/qualificado|reuniao|encaminhado/.test(l.stage)?"q":/humano|descartado/.test(l.stage)?"h":""}">${l.stage}</span>${(()=>{try{const t=JSON.parse(l.bant||"{}").temperatura;return t?`<span class="tag ${t=="quente"?"q":t=="frio"?"h":""}">${esc(t)}</span>`:""}catch(e){return""}})()}<span class="tag">${esc(l.niche||"")}</span><span class="tag">${l.origin=="receptivo"?"Receptivo":"Ativo"}</span></div>`).join("");
+ $("leads").innerHTML=filterLeads(leads,"lf").map(l=>`<div class="item ${l.phone==cur?"sel":""}" data-p="${l.phone}">${av(l.phone,l.name||l.phone,"")}<b>${esc(l.name||l.phone)}</b>${l.test?" <span class='tag'>teste</span>":""}<br><small>${esc(l.company||l.phone)}</small><br><span class="tag ${/qualificado|reuniao|encaminhado/.test(l.stage)?"q":/humano|descartado/.test(l.stage)?"h":""}">${l.stage}</span>${(()=>{try{const t=JSON.parse(l.bant||"{}").temperatura;return t?`<span class="tag ${t=="quente"?"q":t=="frio"?"h":""}">${esc(t)}</span>`:""}catch(e){return""}})()}<span class="tag">${esc(l.niche||"")}</span><span class="tag">${l.origin=="receptivo"?"Receptivo":"Ativo"}</span>${tagChips(l.tags)}</div>`).join("")||'<div class="note" style="padding:12px">Nenhum lead neste filtro.</div>';
  document.querySelectorAll("#leads .item").forEach(e=>e.onclick=()=>{cur=e.dataset.p;lastChat="";tick()});
  const L=leads.find(l=>l.phone==cur);
  if(!L){$("fb").style.display=$("lx").style.display=$("ld").style.display=$("tq").style.display="none"}
  if(L){$("ct").innerHTML=av(L.phone,L.name||L.phone,"","sm")+" "+esc((L.name||L.phone)+(L.human?" · IA pausada":"")+(L.human&&L.agent_id>0?" · com "+(L.agent_name||"atendente"):L.human&&L.agent_id==-1?" · com você (painel)":L.human&&!L.agent_id?" · na fila da equipe":""));$("tq").style.display=L.human&&L.agent_id==-1||!L.human?"":"none";$("tq").onclick=async()=>{await api(`/api/leads/${L.phone}/handoff`,{});tick()};$("fb").style.display="";$("lx").style.display="";$("ld").style.display="";$("lx").onclick=()=>dl(`/api/leads/${L.phone}/export`,`dados-${L.phone}.json`);$("ld").onclick=async()=>{if(!confirm("Apagar TODOS os dados deste contato (mensagens, arquivos, etapas, avisos)? Isso não pode ser desfeito. Se ele pediu SAIR, o número continua na lista para não receber mensagens."))return;const r=await api(`/api/leads/${L.phone}`,null,"DELETE");alert("Dados apagados."+(r.crm_externo?" Atenção: este contato também foi enviado ao seu CRM; apague lá também.":""));cur=null;lastChat="";tick()};const t=$("tk");t.style.display="";t.textContent=L.human?"Retomar IA":"Assumir conversa";t.onclick=async()=>{await api(`/api/leads/${L.phone}/takeover`,{human:!L.human});tick()};
   const b=JSON.parse(L.bant||"{}");const rows=[["Nicho",L.niche||"—"],["Origem",L.origin=="receptivo"?"Receptivo (ele chamou)":"Ativo (disparo)"],["Estágio",L.stage],...Object.entries(b).map(([k,v])=>[pretty(k),v]),["Reunião",L.meeting||"—"]];
-  $("crm").innerHTML=rows.map(([a,v])=>`<div><span>${esc(a)}</span><span>${esc(v)}</span></div>`).join("");
+  $("crm").innerHTML=rows.map(([a,v])=>`<div><span>${esc(a)}</span><span>${esc(v)}</span></div>`).join("");renderLeadTags(L);
   renderOutcome(L);
   const m=await api("/api/messages/"+cur),j=JSON.stringify(m);
   if(j!=lastChat){lastChat=j;const op=meOf(L.line);$("chat").innerHTML=m.map(x=>{const lead=x.role=="lead",who=lead?(L.name||L.phone):(x.role=="humano"?(x.agent||"Operador"):(op.label||"SDR"));
@@ -518,6 +549,51 @@ async function runDiag(){$("dgsum").textContent="Verificando…";$("dgl").innerH
  catch(e){$("dgsum").textContent="Não foi possível verificar: "+((e&&e.message)||"erro")}finally{$("dgrun").disabled=false}}
 $("pdg").onclick=()=>{$("dgdlg").showModal();runDiag()};$("dgrun").onclick=runDiag;$("dgx").onclick=()=>$("dgdlg").close();
 // equipe de atendimento (transferência para humano)
+// etiquetas, filtros e quadro
+let TAGS=[],STAGES=[],TAGCOL={};
+async function loadTags(){try{const d=await api("/api/tags");TAGS=d.tags;STAGES=d.stages;TAGCOL=d.colors;fillFilters()}catch(e){}}
+const tagOf=id=>TAGS.find(t=>t.id==id);
+function tagChips(ids){return (ids||[]).map(tagOf).filter(Boolean).map(t=>`<span class="tg" style="--tc:${TAGCOL[t.color]||"#94a3b8"}">${esc(t.name)}</span>`).join("")}
+function fillFilters(){const keep={lf_s:$("lf_s").value,lf_t:$("lf_t").value,kb_t:$("kb_t").value};
+ $("lf_s").innerHTML='<option value="">Todas as etapas</option>'+STAGES.map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join("");
+ const to='<option value="">Todas as etiquetas</option>'+TAGS.map(t=>`<option value="${t.id}">${esc(t.name)}</option>`).join("");$("lf_t").innerHTML=to;$("kb_t").innerHTML=to;
+ $("lf_s").value=keep.lf_s||"";$("lf_t").value=keep.lf_t||"";$("kb_t").value=keep.kb_t||"";
+ $("tg_col").innerHTML=Object.keys(TAGCOL).map(k=>`<option value="${k}">${k}</option>`).join("")}
+function filterLeads(ls,p){const q=($(p+"_q").value||"").toLowerCase().trim(),st=$(p+"_s")?$(p+"_s").value:"",tg=$(p+"_t").value,og=$(p+"_o")?$(p+"_o").value:"";
+ return ls.filter(l=>(!q||[l.name,l.phone,l.company].some(x=>String(x||"").toLowerCase().includes(q)))&&(!st||l.stage==st)&&(!tg||(l.tags||[]).includes(+tg))&&(!og||l.origin==og))}
+["lf_q","lf_s","lf_t"].forEach(i=>$(i).oninput=()=>{lastChat="";window._lsig2="";tick()});
+function renderLeadTags(L){const box=$("tgs");if(!L||!TAGS.length){box.innerHTML="";return}
+ box.innerHTML='<div class="note" style="margin-bottom:2px">Etiquetas</div>'+TAGS.map(t=>`<button type="button" class="tg ${(L.tags||[]).includes(t.id)?"":"off"}" style="--tc:${TAGCOL[t.color]||"#94a3b8"}" data-t="${t.id}">${esc(t.name)}</button>`).join("");
+ box.querySelectorAll("button").forEach(b=>b.onclick=async()=>{const id=+b.dataset.t,cur_=new Set(L.tags||[]);cur_.has(id)?cur_.delete(id):cur_.add(id);try{const r=await api(`/api/leads/${L.phone}/tags`,{tags:[...cur_]},"PUT");L.tags=r.tags;renderLeadTags(L);tick()}catch(e){}})}
+// quadro
+let kbData=[];
+async function loadBoard(){try{if(!STAGES.length)await loadTags();kbData=await api("/api/leads");drawBoard();$("tg_list").innerHTML=TAGS.map(t=>`<span class="tg" style="--tc:${TAGCOL[t.color]||"#94a3b8"}" data-i="${t.id}">${esc(t.name)} <small>${t.leads}</small> <a href="#" data-a="ed">editar</a> <a href="#" data-a="rm">excluir</a></span>`).join(" ");
+ $("tg_list").querySelectorAll("a").forEach(a=>a.onclick=async e=>{e.preventDefault();const id=+a.parentElement.dataset.i,t=tagOf(id);
+  try{if(a.dataset.a=="rm"){if(!confirm("Excluir a etiqueta "+t.name+"? Ela sai de todos os leads."))return;await api("/api/tags/"+id,null,"DELETE")}
+   else{const n=prompt("Novo nome da etiqueta:",t.name);if(!n)return;const c=prompt("Cor ("+Object.keys(TAGCOL).join(", ")+"):",t.color)||t.color;await api("/api/tags/"+id,{name:n,color:c},"PUT")}
+   await loadTags();loadBoard()}catch(e){}})}catch(e){}}
+function drawBoard(){const ls=filterLeads(kbData.filter(l=>!l.test),"kb");$("kb_n").textContent=ls.length+" lead(s)";
+ $("kb").innerHTML=STAGES.map(([k,v])=>{const c=ls.filter(l=>l.stage==k);return`<div class="kcol" data-s="${k}"><h3>${esc(v)} <span class="note">${c.length}</span></h3><div class="kcards">`+c.map(l=>`<div class="kcard" draggable="true" data-p="${l.phone}"><b>${esc(l.name||l.phone)}</b><small>${esc(l.company||l.phone)}${l.agent_name?" · "+esc(l.agent_name):""}</small><div>${tagChips(l.tags)}${l.outcome?`<span class="tag">${esc(l.outcome)}</span>`:""}</div></div>`).join("")+`</div></div>`}).join("");
+ let dragP=null;
+ $("kb").querySelectorAll(".kcard").forEach(c=>{c.ondragstart=e=>{dragP=c.dataset.p;c.classList.add("drag");e.dataTransfer.setData("text/plain",dragP);e.dataTransfer.effectAllowed="move"};c.ondragend=()=>c.classList.remove("drag");c.onclick=()=>{cur=c.dataset.p;tab(1);lastChat="";tick()}});
+ $("kb").querySelectorAll(".kcol").forEach(col=>{col.ondragover=e=>{e.preventDefault();col.classList.add("over")};col.ondragleave=()=>col.classList.remove("over");
+  col.ondrop=async e=>{e.preventDefault();col.classList.remove("over");const p=dragP||e.dataTransfer.getData("text/plain"),st=col.dataset.s,l=kbData.find(x=>x.phone==p);if(!l||l.stage==st)return;
+   if(st=="descartado"&&!confirm("Descartar este lead? O contato entra na lista de supressão e nunca mais recebe mensagem."))return;
+   if(st=="humano"&&!confirm("Enviar esta conversa à equipe? A IA pausa e a fila de atendimento assume."))return;
+   if(l.human&&st!="humano"&&!confirm("Esta conversa está com a equipe. Mover para fora de 'Com a equipe' devolve a conversa à IA. Continuar?"))return;
+   try{await api(`/api/leads/${p}/stage`,{stage:st});loadBoard()}catch(x){loadBoard()}}})}
+["kb_q","kb_t","kb_o"].forEach(i=>$(i).oninput=()=>drawBoard());
+$("kb_tg").onclick=()=>$("kb_mg").classList.toggle("hide");
+$("tg_add").onclick=async()=>{try{await api("/api/tags",{name:$("tg_name").value,color:$("tg_col").value});$("tg_name").value="";await loadTags();loadBoard()}catch(e){}};
+setInterval(()=>{if(!$("v9").classList.contains("hide")&&document.activeElement.tagName!="INPUT")loadBoard()},6000);
+loadTags();
+// auditoria
+async function loadAudit(){try{const a=$("au_a").value;const d=await api(`/api/audit?days=${$("au_d").value}&actor=${encodeURIComponent(a)}&q=${encodeURIComponent($("au_q").value)}&limit=300`);$("au_keep").textContent=d.keep_days;
+ if($("au_a").options.length<=1)d.actors.forEach(x=>{const o=document.createElement("option");o.value=x;o.textContent=x;$("au_a").appendChild(o)});
+ $("au_s").textContent=d.rows.length+" registro(s)";
+ $("au_list").innerHTML=d.rows.length?'<table><thead><tr><th>Quando</th><th>Perfil</th><th>Pessoa</th><th>Ação</th><th>Alvo</th><th>IP</th></tr></thead><tbody>'+d.rows.map(r=>`<tr><td style="white-space:nowrap">${new Date(r.ts*1e3).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</td><td>${esc(r.actor)}</td><td>${esc(r.actor_name)}</td><td>${esc(r.action)}</td><td>${esc(r.target)}</td><td><small>${esc(r.ip)}</small></td></tr>`).join("")+'</tbody></table>':'<div class="note">Nenhum registro neste filtro.</div>'}catch(e){}}
+$("au_go").onclick=loadAudit;["au_d","au_a"].forEach(i=>$(i).onchange=loadAudit);$("au_q").onkeydown=e=>{if(e.key=="Enter")loadAudit()};
+$("au_csv").onclick=()=>dl(`/api/audit.csv?days=${$("au_d").value}&actor=${encodeURIComponent($("au_a").value)}&q=${encodeURIComponent($("au_q").value)}`,"auditoria.csv");
 // gestores de equipe
 let MGRN={};
 async function loadManagers(){try{const d=await api("/api/managers");$("gm_url").textContent=location.origin+"/gestor";MGRN={};d.managers.forEach(m=>MGRN[m.id]=m.name);
@@ -549,6 +625,24 @@ const FMTS=s=>s==null?"—":s<90?s+" s":s<5400?Math.round(s/60)+" min":(s/3600).
 async function loadHours(){try{const d=await api("/api/hours");if(window._hrEdit)return;$("hr_on").checked=d.config.enabled;$("hr_msg").value=d.config.message;
  $("hr_days").innerHTML=d.day_names.map((n,i)=>{const x=d.config.days[i];return `<div class="row" style="align-items:center;gap:6px"><label style="width:70px;margin:0"><input type="checkbox" data-hd="${i}" ${x?"checked":""}> ${n}</label><input type="time" data-hs="${i}" value="${x?x[0]:"09:00"}" style="width:110px"> às <input type="time" data-he="${i}" value="${x?x[1]:"18:00"}" style="width:110px"></div>`}).join("");
  $("hr_days").oninput=$("hr_on").oninput=$("hr_msg").oninput=()=>{window._hrEdit=true}}catch(e){}}
+// roteiros
+let FL={flows:[],triggers:{},actions:{}},flId=null;
+async function loadFlows(){try{FL=await api("/api/flows");$("fl_trig").innerHTML=Object.entries(FL.triggers).map(([k,v])=>`<option value="${k}">${esc(v)}</option>`).join("");
+ $("fl_list").innerHTML=FL.flows.length?FL.flows.map(f=>`<div class="item" data-f="${f.id}"><b>${esc(f.name)}</b> <span class="tag q">${esc(FL.triggers[f.trigger]||f.trigger)}</span>${f.active?"":' <span class="tag">desligado</span>'}<br><small>${f.options.length?f.options.length+" opção(ões)":"sem menu"}${f.keywords.length?" · "+esc(f.keywords.join(", ")):""}</small> <a href="#" data-fe="${f.id}">editar</a> · <a href="#" data-fd="${f.id}">excluir</a></div>`).join(""):'<div class="note">Nenhum roteiro ainda.</div>';
+ $("fl_list").querySelectorAll("[data-fe]").forEach(a=>a.onclick=e=>{e.preventDefault();flEdit(+a.dataset.fe)});
+ $("fl_list").querySelectorAll("[data-fd]").forEach(a=>a.onclick=async e=>{e.preventDefault();if(!confirm("Excluir este roteiro?"))return;try{await api("/api/flows/"+a.dataset.fd,null,"DELETE");loadFlows()}catch(x){flash("fl_m",x.message,5000)}});
+ $("fl_dl").innerHTML=(typeof niches!="undefined"?niches.map(n=>n.name):[]).concat((TAGS||[]).map(t=>t.name)).map(v=>`<option value="${esc(v)}">`).join("")}catch(e){}}
+function flOptRow(o){o=o||{label:"",action:"text",value:""};const d=document.createElement("div");d.className="row";d.style.cssText="gap:6px;align-items:center;margin:4px 0";
+ d.innerHTML=`<input class="fo_l" placeholder="Texto da opção" maxlength="40" value="${esc(o.label)}" style="flex:1"><select class="fo_a">${Object.entries(FL.actions).map(([k,v])=>`<option value="${k}" ${k==o.action?"selected":""}>${esc(v)}</option>`).join("")}</select><input class="fo_v" list="fl_dl" placeholder="Texto / nicho / etiqueta" value="${esc(o.value)}" style="flex:1"><a href="#" class="fo_x">✕</a>`;
+ d.querySelector(".fo_x").onclick=e=>{e.preventDefault();d.remove()};$("fl_opts").appendChild(d)}
+function flTrig(){$("fl_kwb").classList.toggle("hide",$("fl_trig").value!="keyword")}
+function flEdit(id){const f=FL.flows.find(x=>x.id==id)||{name:"",trigger:"first",keywords:[],message:"",options:[],stop_ai:1,active:1};flId=f.id||null;
+ $("fl_name").value=f.name;$("fl_trig").value=f.trigger;$("fl_kw").value=f.keywords.join(", ");$("fl_msg").value=f.message;$("fl_stop").checked=!!f.stop_ai;$("fl_act").checked=!!f.active;
+ $("fl_opts").innerHTML="";f.options.forEach(flOptRow);flTrig();$("fl_m").textContent="";$("fl_ed").classList.remove("hide")}
+$("fl_trig").onchange=flTrig;$("fl_new").onclick=()=>flEdit(0);$("fl_cancel").onclick=()=>$("fl_ed").classList.add("hide");$("fl_addopt").onclick=()=>flOptRow();
+$("fl_save").onclick=async()=>{const options=[...$("fl_opts").children].map(d=>({label:d.querySelector(".fo_l").value,action:d.querySelector(".fo_a").value,value:d.querySelector(".fo_v").value}));
+ const b={name:$("fl_name").value,trigger:$("fl_trig").value,keywords:$("fl_kw").value,message:$("fl_msg").value,options,stop_ai:$("fl_stop").checked,active:$("fl_act").checked};
+ try{await api(flId?"/api/flows/"+flId:"/api/flows",b,flId?"PUT":"POST");$("fl_ed").classList.add("hide");loadFlows()}catch(e){flash("fl_m",e.message,6000)}};
 $("hr_save").onclick=async()=>{const days=[0,1,2,3,4,5,6].map(i=>document.querySelector(`[data-hd="${i}"]`).checked?[document.querySelector(`[data-hs="${i}"]`).value,document.querySelector(`[data-he="${i}"]`).value]:null);
  try{await api("/api/hours",{enabled:$("hr_on").checked,days,message:$("hr_msg").value},"PUT");window._hrEdit=false;flash("hr_m","Salvo");loadHours()}catch(e){flash("hr_m",e.message,6000)}};
 async function loadQuick(){try{const q=await api("/api/quick");QK=q;$("qk_list").innerHTML=q.map(x=>`<div class="row" style="align-items:center"><div style="flex:1"><b>${esc(x.title)}</b><br><small class="note">${esc(x.body)}</small></div><button class="d" data-qd="${x.id}">Apagar</button></div>`).join("")||'<div class="note">Nenhuma ainda.</div>';
@@ -574,7 +668,7 @@ function gcBody(){return {enabled:$("gc_on").checked,calendar_id:$("gc_id").valu
 $("gc_save").onclick=async()=>{try{await api("/api/gcal",gcBody(),"PUT");window._gcEdit=false;$("gc_json").value="";flash("gc_m","Salvo");gcLoad()}catch(e){flash("gc_m",e.message,7000)}};
 $("gc_rm").onclick=async()=>{if(!confirm("Remover a conta de serviço? O agente deixa de usar a agenda."))return;try{await api("/api/gcal",{...gcBody(),enabled:false,sa_json:"",remove_sa:true},"PUT");window._gcEdit=false;gcLoad()}catch(e){flash("gc_m",e.message,6000)}};
 $("gc_test").onclick=async()=>{$("gc_m").textContent="Testando…";try{const r=await api("/api/gcal/test",{});$("gc_m").textContent=r.ok?`Conectado à agenda "${r.calendar}". Próximos horários livres: ${r.slots.join(", ")||"nenhum"}`:r.error}catch(e){$("gc_m").textContent=e.message}};
-async function loadAvisos(){loadDigest();loadManagers().then(loadTeam);loadHours();loadQuick();loadMetrics();const a=await api("/api/alerts"),c=a.config;
+async function loadAvisos(){loadFlows();loadAudit();loadDigest();loadManagers().then(loadTeam);loadHours();loadQuick();loadMetrics();const a=await api("/api/alerts"),c=a.config;
  if(!aEdit){AB.forEach(k=>$("a_"+k).checked=!!c[k]);AK.forEach(k=>$("a_"+k).value=c[k]);$("a_whatsapp_to").value=c.whatsapp_to.split(",").filter(Boolean).join(", ")};$("a_wavs").innerHTML=c.whatsapp_to.split(",").filter(Boolean).map(n=>`<span style="display:inline-flex;gap:5px;align-items:center;font-size:12px">${av(n,n,"main","sm")}+${esc(n)}</span>`).join("")
  const ch=a.channels;$("ach").innerHTML="Canais ativos: "+[["WhatsApp",ch.whatsapp],["E-mail"+(a.email_to.length?" ("+a.email_to.map(esc).join(", ")+")":""),ch.email],["Slack/Discord (webhook)",ch.webhook]].map(([n,o])=>`<span class="tag ${o?"q":""}">${o?"✓":"✗"} ${n}</span>`).join(" ");
  $("aw").innerHTML=a.waiting.length?a.waiting.map(w=>`<div class="item" data-p="${w.phone}"><b>${esc(w.name||w.phone)}</b> <span class="tag h">${w.stage}</span><br><small>${esc(w.niche||"")} · há ${w.minutes<60?w.minutes+" min":Math.round(w.minutes/60)+" h"}${w.summary?" · "+esc(w.summary):""}</small></div>`).join(""):'<div class="note" style="padding:12px">Nenhum lead aguardando atendimento.</div>';

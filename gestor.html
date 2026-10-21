@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Gestor</title>
+<link rel="manifest" href="/manifest-gestor.webmanifest"><meta name="theme-color" content="#25d366"><link rel="apple-touch-icon" href="/icon-192.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <style>
 :root{--bg:#0a2218;--card:#103928;--tx:#f2fbf5;--mut:#9cc3ad;--bd:#1f4d39;--ac:#25d366;--acx:#07241a;--in:#1b5a3a;--out:#14442f;--wa:#3a3320;--bad:#ff6b6b;--chip:#1a4a35;color-scheme:dark}
 @media(prefers-color-scheme:light){:root{--bg:#f0f4f9;--card:#ffffff;--tx:#1c1e21;--mut:#526571;--bd:#e0e6ee;--in:#d8f4cc;--out:#ffffff;--wa:#fff4d6;--bad:#d14343;--chip:#e6edf5;color-scheme:light}}
@@ -60,7 +61,7 @@ table{width:100%;border-collapse:collapse}td,th{padding:7px 6px;border-bottom:1p
 </div>
 
 <div id="app" class="hide">
- <header><b id="who"></b><span class="note" id="sub"></span><span class="sp"></span><button class="g" id="out">Sair</button></header>
+ <header><b id="who"></b><span class="note" id="sub"></span><span class="sp"></span><button class="g" id="pushb">Ativar avisos</button><button class="g" id="out">Sair</button></header>
  <nav id="tabs"><button data-t="chats" class="on">Conversas</button><button data-t="wa">Meu WhatsApp</button><button data-t="team">Minha equipe</button><button data-t="perf">Desempenho</button></nav>
  <div class="pane" id="p_chats"><div id="chats">
   <div class="lst" id="ll"></div>
@@ -101,7 +102,7 @@ $("lf").onsubmit=async e=>{e.preventDefault();$("lerr").textContent="";$("lbtn")
  try{const r=await fetch("/api/gestor/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({login:$("lg").value,password:$("pw").value})});const j=await r.json().catch(()=>({}));
   if(!r.ok)throw new Error(j.detail||"Não foi possível entrar");TK=j.token;try{localStorage.setItem("mtok",TK)}catch(e){}$("pw").value="";start()}
  catch(x){$("lerr").textContent=x.message}finally{$("lbtn").disabled=false}};
-$("out").onclick=async()=>{try{await api("/api/gestor/logout",{})}catch(e){}bye()};
+$("out").onclick=async()=>{await pushDrop();try{await api("/api/gestor/logout",{})}catch(e){}bye()};
 document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("on",x==b));["chats","wa","team","perf"].forEach(t=>$("p_"+t).classList.toggle("hide",t!=tab));refresh(true)});
 
 async function start(){$("login").classList.add("hide");$("app").classList.remove("hide");await refresh(true);setInterval(()=>refresh(),3000)}
@@ -167,6 +168,22 @@ const fmt=s=>s==null?"—":s<90?s+" s":s<5400?Math.round(s/60)+" min":(s/3600).t
 async function perf(force){if(!force&&window._pf)return;window._pf=1;try{const d=await api("/api/gestor/metrics?days="+$("pd").value);
  $("pm").innerHTML=d.agents.length?'<table><thead><tr><th>Atendente</th><th>Conversas</th><th>Mensagens</th><th>1ª resposta</th><th>Espera na fila</th><th>Ganhos</th><th>Perdidos</th></tr></thead><tbody>'+d.agents.map(a=>`<tr><td>${esc(a.name)}</td><td>${a.handled}</td><td>${a.messages}</td><td>${fmt(a.first_reply_s)}</td><td>${fmt(a.queue_wait_s)}</td><td>${a.won}</td><td>${a.lost}</td></tr>`).join("")+'</tbody></table>':'<div class="note">Crie atendentes para ver o desempenho.</div>'}catch(e){}finally{setTimeout(()=>window._pf=0,15000)}}
 $("pd").onchange=()=>{window._pf=0;perf(true)};
+// app no celular: instalar na tela inicial e receber avisos
+const PFX="/api/gestor";let SWR=null;
+function b2u(s){const p="=".repeat((4-s.length%4)%4),r=atob((s+p).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...r].map(c=>c.charCodeAt(0)))}
+async function swInit(){try{if("serviceWorker" in navigator)SWR=await navigator.serviceWorker.register("/sw.js")}catch(e){}pushUi()}
+async function pushUi(){const b=$("pushb");if(!b)return;
+ if(!SWR||!("PushManager" in window)||!("Notification" in window)){b.dataset.s="na";b.textContent="Avisos no celular";return}
+ try{const s=await SWR.pushManager.getSubscription(),on=!!s&&Notification.permission=="granted";b.dataset.s=on?"on":"off";b.textContent=on?"Avisos ativados":"Ativar avisos";
+  if(on&&TK)api(PFX+"/push",s.toJSON()).catch(()=>{})}catch(e){}}
+async function pushDrop(){try{const s=SWR&&await SWR.pushManager.getSubscription();if(s)await api(PFX+"/push",{endpoint:s.endpoint},"DELETE")}catch(e){}}
+$("pushb").onclick=async()=>{const b=$("pushb");
+ if(b.dataset.s=="na"){alert("Para receber avisos no celular: no Android, abra no Chrome e use \"Instalar app\" (ou \"Adicionar à tela inicial\"). No iPhone, abra no Safari, toque em Compartilhar > \"Adicionar à Tela de Início\" e abra o app instalado. Depois toque aqui de novo.");return}
+ try{if(b.dataset.s=="on"){const s=await SWR.pushManager.getSubscription();if(s){await pushDrop();await s.unsubscribe()}}
+  else{const p=await Notification.requestPermission();if(p!="granted"){alert("As notificações estão bloqueadas. Libere nas configurações do navegador para este site.");return}
+   const k=(await (await fetch("/api/push/key")).json()).key;const s=await SWR.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b2u(k)});await api(PFX+"/push",s.toJSON())}
+ }catch(e){alert("Não foi possível alterar os avisos: "+e.message)}pushUi()};
+swInit();
 if(TK){start().catch(()=>bye())}
 </script>
 </body>

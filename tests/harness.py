@@ -12,6 +12,7 @@ DEFAULT_ENV = {"DB_PATH": f"{TMP}/t.db", "UPLOADS_DIR": f"{TMP}/up", "DASH_TOKEN
 
 # ---------- estado simulado ----------
 SENT, CALLS, GW_LOG, HOOKS, MAIL, CRM = [], [], [], [], [], []
+PUSHLOG = []   # avisos push enviados (endereços "push.test")
 def _default_lead(system, msgs):
     n = sum(1 for m in msgs if m["role"] == "assistant")
     if "escreva apenas: SAIR" in system: return "oi, o que vocês vendem?" if n == 0 else "SAIR"
@@ -100,6 +101,9 @@ class FakeClient:
             try: data = __import__("json").loads(raw or b"{}")
             except ValueError: data = {}
             return FakeResp(st, data)
+        if "push.test" in url:
+            PUSHLOG.append({"url": url, "headers": headers or {}, "body": k.get("content")})
+            return FakeResp(410 if "gone" in url else 201, {})
         if "supabase.co" in url:
             p_ = urlparse(url).path; SUPA["calls"].append((method, p_))
             if SUPA["badkey"] or (headers or {}).get("apikey") != "svc-key": return FakeResp(401, {"message": "Invalid API key"})

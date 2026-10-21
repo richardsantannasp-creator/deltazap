@@ -567,6 +567,7 @@ async def handle_incoming(phone, name, text, wamid=None, send=True, line=None):
             return
         if lead["human"]:
             log("ia", f"{phone}: conversa com humano, IA pausada")
+            push_human_msg(lead)
             if lead["agent_id"] != -1:
                 await ooh_notice(phone, send=send)
             return
@@ -3849,6 +3850,7 @@ def assign_next(phone, exclude=()):
     if not cur.rowcount:
         return None
     log("humano", f"{phone}: conversa entregue a {best['name']}")
+    push_later("agent", [best["id"]], "Nova conversa", f"{_pname(phone)} foi enviada para você", "/atendente", "lead-" + phone)
     return best
 
 def handoff_begin(phone, reason, source="ia", exclude=()):
@@ -3856,11 +3858,13 @@ def handoff_begin(phone, reason, source="ia", exclude=()):
     set_lead(phone, human=1, stage="humano", agent_id=None, handoff_at=time.time(), assigned_at=None, first_reply_at=None, handoff_reason=str(reason or "")[:300])
     ooh = hours_note_for_agent()
     if not agents_active_count(lead_manager(phone)):
+        push_queue(phone)
         return "Transferido. Avise o lead que uma pessoa vai assumir a conversa." + ooh
     a = assign_next(phone, exclude)
     if a:
         return f"Transferido para {a['name']}, da equipe, que já foi avisado(a) e continua a conversa. Avise o lead disso e não faça mais perguntas." + ooh
     log("humano", f"{phone}: na fila de atendimento (ninguém disponível agora)")
+    push_queue(phone)
     return ("Transferido para a fila da equipe: no momento ninguém está disponível. Avise o lead, com honestidade, que a equipe responde assim que possível "
             "(não prometa prazo) e que tudo o que ele contou já está registrado. Não faça mais perguntas." + ooh)
 
@@ -6026,3 +6030,215 @@ async def gestor_send(phone: str, b: TextIn, x_token: str = Header(default="")):
         raise HTTPException(409, WINDOW_MSG)
     set_lead(phone, handled_at=time.time())
     return {"ok": True}
+
+# ======================================================================
+# v16: app no celular (PWA) e avisos push para atendentes e gestores
+# Web Push (RFC 8291 aes128gcm + VAPID RFC 8292) feito direto com a biblioteca de criptografia já usada pelo sistema.
+# O aviso nunca leva o texto da mensagem (a tela bloqueada não deve expor o conteúdo): só "nova mensagem de Fulano".
+# ======================================================================
+def migrate_v16():
+    with conn() as c:
+        c.executescript("""CREATE TABLE IF NOT EXISTS push_subs(id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT, owner_id INTEGER, endpoint TEXT UNIQUE,
+            p256dh TEXT, auth TEXT, created REAL);""")
+migrate_v16()
+
+PUSH_LAST = {}          # (tipo, dono, tag) -> instante do último aviso (evita enxurrada)
+PUSH_GAP = 20
+
+def _b64u(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+def _b64u_d(s):
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+def vapid_keys():
+    """Par de chaves VAPID (gerado uma vez e guardado no banco). A chave pública vai para o navegador; a privada fica no servidor."""
+    raw = get_setting("vapid")
+    if raw:
+        try:
+            d = json.loads(raw)
+            if d.get("priv") and d.get("pub"):
+                return d
+        except ValueError:
+            pass
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import serialization
+    k = ec.generate_private_key(ec.SECP256R1())
+    d = {"priv": _b64u(k.private_numbers().private_value.to_bytes(32, "big")),
+         "pub": _b64u(k.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))}
+    set_setting("vapid", json.dumps(d))
+    return d
+
+def push_encrypt(payload, ua_public, auth_secret, as_private=None, salt=None):
+    """Cifra o aviso para o navegador (RFC 8291, aes128gcm). Devolve o corpo da requisição."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    priv = as_private or ec.generate_private_key(ec.SECP256R1())
+    as_pub = priv.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+    ua = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), ua_public)
+    shared = priv.exchange(ec.ECDH(), ua)
+    ikm = HKDF(algorithm=hashes.SHA256(), length=32, salt=auth_secret, info=b"WebPush: info\x00" + ua_public + as_pub).derive(shared)
+    salt = salt or os.urandom(16)
+    cek = HKDF(algorithm=hashes.SHA256(), length=16, salt=salt, info=b"Content-Encoding: aes128gcm\x00").derive(ikm)
+    nonce = HKDF(algorithm=hashes.SHA256(), length=12, salt=salt, info=b"Content-Encoding: nonce\x00").derive(ikm)
+    ct = AESGCM(cek).encrypt(nonce, payload + b"\x02", None)
+    return salt + (4096).to_bytes(4, "big") + bytes([len(as_pub)]) + as_pub + ct
+
+def vapid_header(endpoint, keys=None):
+    """Cabeçalho Authorization (VAPID, RFC 8292) provando que o aviso vem deste servidor."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    from urllib.parse import urlparse
+    keys = keys or vapid_keys()
+    u = urlparse(endpoint)
+    head = _b64u(json.dumps({"typ": "JWT", "alg": "ES256"}, separators=(",", ":")).encode())
+    body = _b64u(json.dumps({"aud": f"{u.scheme}://{u.netloc}", "exp": int(time.time()) + 12 * 3600, "sub": "mailto:" + (os.getenv("PUSH_CONTACT") or (os.getenv("NOTIFY_EMAIL_TO") or "").split(",")[0].strip() or "contato@example.com")}, separators=(",", ":")).encode())
+    key = ec.derive_private_key(int.from_bytes(_b64u_d(keys["priv"]), "big"), ec.SECP256R1())
+    r, s_ = decode_dss_signature(key.sign(f"{head}.{body}".encode(), ec.ECDSA(hashes.SHA256())))
+    jwt = f"{head}.{body}.{_b64u(r.to_bytes(32, 'big') + s_.to_bytes(32, 'big'))}"
+    return f"vapid t={jwt}, k={keys['pub']}"
+
+async def push_send(sub, payload):
+    """Envia um aviso a um aparelho. Remove a inscrição quando o navegador diz que ela não existe mais (404/410)."""
+    try:
+        body = push_encrypt(json.dumps(payload, ensure_ascii=False).encode(), _b64u_d(sub["p256dh"]), _b64u_d(sub["auth"]))
+        async with httpx.AsyncClient(timeout=10) as h:
+            r = await h.post(sub["endpoint"], headers={"Authorization": vapid_header(sub["endpoint"]), "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream",
+                                                       "TTL": "3600", "Urgency": "high"}, content=body)
+    except Exception as e:
+        log("aviso", f"push: falha ao enviar ({type(e).__name__})")
+        return False
+    if r.status_code in (404, 410):
+        with conn() as c:
+            c.execute("DELETE FROM push_subs WHERE endpoint=?", (sub["endpoint"],))
+        return False
+    if r.status_code >= 300:
+        log("aviso", f"push: o serviço de avisos respondeu {r.status_code}")
+        return False
+    return True
+
+async def push_notify(kind, owner_ids, title, body, url, tag=""):
+    now = time.time()
+    ids = [i for i in dict.fromkeys(owner_ids) if now - PUSH_LAST.get((kind, i, tag), 0) > PUSH_GAP]
+    if not ids:
+        return 0
+    for i in ids:
+        PUSH_LAST[(kind, i, tag)] = now
+    with conn() as c:
+        subs = [dict(r) for r in c.execute(f"SELECT * FROM push_subs WHERE kind=? AND owner_id IN ({','.join('?' * len(ids))})", [kind] + ids)]
+    ok = 0
+    for sb in subs:
+        ok += bool(await push_send(sb, {"title": title, "body": body, "url": url, "tag": tag or "sdr"}))
+    return ok
+
+def push_later(kind, owner_ids, title, body, url, tag=""):
+    """Dispara o aviso em segundo plano (as funções que chamam são síncronas). Nunca derruba o atendimento."""
+    if not owner_ids:
+        return
+    try:
+        asyncio.get_running_loop().create_task(push_notify(kind, list(owner_ids), title, body, url, tag))
+    except RuntimeError:
+        pass
+
+def _pname(phone):
+    l = get_lead(phone)
+    n = ((l["name"] if l else "") or "").strip().split(" ")[0]
+    return n or ("contato " + phone[-4:])
+
+def push_queue(phone):
+    """Conversa na fila: avisa os atendentes disponíveis da equipe dona do número e o gestor."""
+    mid = lead_manager(phone)
+    with conn() as c:
+        ags = [r["id"] for r in c.execute("SELECT id FROM agents WHERE active=1 AND available=1 AND manager_id=?", (mid,))]
+    push_later("agent", ags, "Conversa na fila", f"{_pname(phone)} está esperando atendimento", "/atendente", "fila-" + phone)
+    if mid:
+        push_later("manager", [mid], "Conversa na fila", f"{_pname(phone)} está esperando atendimento", "/gestor", "fila-" + phone)
+
+def push_human_msg(lead):
+    """O lead escreveu enquanto a conversa está com a equipe: avisa quem está com ela."""
+    phone, aid, mid = lead["phone"], lead["agent_id"], lead_manager(lead["phone"])
+    if aid and aid > 0:
+        push_later("agent", [aid], "Nova mensagem", f"{_pname(phone)} respondeu", "/atendente", "msg-" + phone)
+    elif aid is None:
+        push_queue(phone)
+    elif mid:
+        push_later("manager", [mid], "Nova mensagem", f"{_pname(phone)} respondeu", "/gestor", "msg-" + phone)
+
+class PushIn(BaseModel):
+    endpoint: str = ""
+    keys: Optional[dict] = None
+
+def _push_save(kind, owner, b):
+    k = b.keys or {}
+    if not b.endpoint.startswith("https://") or not k.get("p256dh") or not k.get("auth"):
+        raise HTTPException(400, "inscrição de aviso inválida")
+    with conn() as c:
+        c.execute("DELETE FROM push_subs WHERE endpoint=?", (b.endpoint,))          # o mesmo aparelho pode trocar de usuário
+        c.execute("INSERT INTO push_subs(kind,owner_id,endpoint,p256dh,auth,created) VALUES(?,?,?,?,?,?)", (kind, owner, b.endpoint, k["p256dh"], k["auth"], time.time()))
+    return {"ok": True}
+
+def _push_drop(kind, owner, b):
+    with conn() as c:
+        c.execute("DELETE FROM push_subs WHERE endpoint=? AND kind=? AND owner_id=?", (b.endpoint, kind, owner))
+    return {"ok": True}
+
+@app.get("/api/push/key")
+async def push_key():
+    """Chave pública VAPID (não é segredo): o navegador usa para se inscrever nos avisos."""
+    return {"key": vapid_keys()["pub"]}
+
+@app.post("/api/agent/push")
+async def agent_push_on(b: PushIn, x_token: str = Header(default="")):
+    a = agent_from_token(x_token)
+    return _push_save("agent", a["id"], b)
+
+@app.delete("/api/agent/push")
+async def agent_push_off(b: PushIn, x_token: str = Header(default="")):
+    a = agent_from_token(x_token)
+    return _push_drop("agent", a["id"], b)
+
+@app.post("/api/gestor/push")
+async def gestor_push_on(b: PushIn, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    return _push_save("manager", m["id"], b)
+
+@app.delete("/api/gestor/push")
+async def gestor_push_off(b: PushIn, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    return _push_drop("manager", m["id"], b)
+
+# ---- arquivos do app instalável ----
+SW_JS = """self.addEventListener('install',e=>self.skipWaiting());
+self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
+self.addEventListener('fetch',()=>{});
+self.addEventListener('push',e=>{let d={};try{d=e.data.json()}catch(x){}
+ e.waitUntil(self.registration.showNotification(d.title||'Atendimento',{body:d.body||'',tag:d.tag||'sdr',renotify:true,icon:'/icon-192.png',badge:'/icon-192.png',data:{url:d.url||'/'}}))});
+self.addEventListener('notificationclick',e=>{e.notification.close();const u=(e.notification.data&&e.notification.data.url)||'/';
+ e.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(cs=>{for(const c of cs){if(c.url.includes(u)&&'focus' in c)return c.focus()}return self.clients.openWindow(u)}))});
+"""
+
+@app.get("/sw.js")
+async def service_worker():
+    return Response(content=SW_JS, media_type="application/javascript", headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+def _manifest(name, short, start):
+    return {"name": name, "short_name": short, "start_url": start, "scope": "/", "display": "standalone", "background_color": "#0a2218", "theme_color": "#25d366",
+            "lang": "pt-BR", "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+                                       {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]}
+
+@app.get("/manifest-atendente.webmanifest")
+async def manifest_atendente():
+    return Response(content=json.dumps(_manifest("Atendimento", "Atendimento", "/atendente")), media_type="application/manifest+json")
+
+@app.get("/manifest-gestor.webmanifest")
+async def manifest_gestor():
+    return Response(content=json.dumps(_manifest("Gestor", "Gestor", "/gestor")), media_type="application/manifest+json")
+
+@app.get("/icon-{size}.png")
+async def app_icon(size: int):
+    if size not in (192, 512):
+        raise HTTPException(404)
+    return FileResponse(HERE / "static" / f"icon-{size}.png", media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})

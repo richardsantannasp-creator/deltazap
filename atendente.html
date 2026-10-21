@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Atendimento</title>
+<link rel="manifest" href="/manifest-atendente.webmanifest"><meta name="theme-color" content="#25d366"><link rel="apple-touch-icon" href="/icon-192.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <style>
 :root{--bg:#0a2218;--card:#103928;--tx:#f2fbf5;--mut:#9cc3ad;--bd:#1f4d39;--ac:#25d366;--acx:#07241a;--in:#1b5a3a;--out:#14442f;--chat:#0b2519;color-scheme:dark;--wa:#3a3320;--bad:#ff6b6b;--chip:#1a4a35}
 @media(prefers-color-scheme:light){:root{--bg:#f0f4f9;--card:#ffffff;--tx:#1c1e21;--mut:#526571;--bd:#e0e6ee;--ac:#25d366;--acx:#07241a;--in:#d8f4cc;--out:#ffffff;--chat:#e8f2e1;color-scheme:light;--wa:#fff4d6;--bad:#d14343;--chip:#e6edf5}}
@@ -63,7 +64,7 @@ section.chat{background:var(--bg)}aside.info{border-right:0;border-left:1px soli
   <b id="who"></b><span class="st"><span class="dot" id="dot"></span><span id="stx"></span></span>
   <span class="sp"></span>
   <span class="note" id="qn"></span>
-  <button class="g" id="avail"></button><button class="g" id="out">Sair</button>
+  <button class="g" id="pushb">Ativar avisos</button><button class="g" id="avail"></button><button class="g" id="out">Sair</button>
  </header>
  <main id="mn">
   <aside class="lst"><div class="lh">Na fila <span id="cq"></span></div><div class="list" id="ql" style="flex:none;max-height:38%"></div>
@@ -100,7 +101,7 @@ $("lf").onsubmit=async e=>{e.preventDefault();$("lerr").textContent="";$("lbtn")
  try{const r=await fetch("/api/agent/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({login:$("lg").value,password:$("pw").value})});const j=await r.json().catch(()=>({}));
   if(!r.ok)throw new Error(j.detail||"Não foi possível entrar");TK=j.token;try{localStorage.setItem("atok",TK)}catch(e){}$("pw").value="";start()}
  catch(x){$("lerr").textContent=x.message}finally{$("lbtn").disabled=false}};
-$("out").onclick=async()=>{try{await api("/api/agent/logout",{})}catch(e){}bye()};
+$("out").onclick=async()=>{await pushDrop();try{await api("/api/agent/logout",{})}catch(e){}bye()};
 $("avail").onclick=async()=>{await api("/api/agent/status",{available:!ME.available},"PUT");await poll(true)};
 
 async function start(){$("login").classList.add("hide");$("app").classList.remove("hide");loadQuick();await poll(true);setInterval(()=>poll(),3000);setInterval(ping,20000)}
@@ -155,6 +156,22 @@ $("bk").onclick=()=>{$("mn").classList.remove("inchat")};
 $("files").onclick=async()=>{try{const fs=await api("/api/agent/files/"+cur);if(!fs.length){alert("Este lead não enviou arquivos.");return}
  const n=prompt("Arquivos recebidos (digite o número para abrir):\n"+fs.map((f,i)=>`${i+1}. ${f.name}`).join("\n"),"1");const f=fs[(parseInt(n)||0)-1];if(!f)return;
  const r=await fetch(`/api/agent/file/${cur}/${encodeURIComponent(f.name)}`,{headers:{"X-Token":TK}});if(!r.ok)throw new Error("Não foi possível abrir");window.open(URL.createObjectURL(await r.blob()),"_blank")}catch(e){alert(e.message)}};
+// app no celular: instalar na tela inicial e receber avisos
+const PFX="/api/agent";let SWR=null;
+function b2u(s){const p="=".repeat((4-s.length%4)%4),r=atob((s+p).replace(/-/g,"+").replace(/_/g,"/"));return Uint8Array.from([...r].map(c=>c.charCodeAt(0)))}
+async function swInit(){try{if("serviceWorker" in navigator)SWR=await navigator.serviceWorker.register("/sw.js")}catch(e){}pushUi()}
+async function pushUi(){const b=$("pushb");if(!b)return;
+ if(!SWR||!("PushManager" in window)||!("Notification" in window)){b.dataset.s="na";b.textContent="Avisos no celular";return}
+ try{const s=await SWR.pushManager.getSubscription(),on=!!s&&Notification.permission=="granted";b.dataset.s=on?"on":"off";b.textContent=on?"Avisos ativados":"Ativar avisos";
+  if(on&&TK)api(PFX+"/push",s.toJSON()).catch(()=>{})}catch(e){}}
+async function pushDrop(){try{const s=SWR&&await SWR.pushManager.getSubscription();if(s)await api(PFX+"/push",{endpoint:s.endpoint},"DELETE")}catch(e){}}
+$("pushb").onclick=async()=>{const b=$("pushb");
+ if(b.dataset.s=="na"){alert("Para receber avisos no celular: no Android, abra no Chrome e use \"Instalar app\" (ou \"Adicionar à tela inicial\"). No iPhone, abra no Safari, toque em Compartilhar > \"Adicionar à Tela de Início\" e abra o app instalado. Depois toque aqui de novo.");return}
+ try{if(b.dataset.s=="on"){const s=await SWR.pushManager.getSubscription();if(s){await pushDrop();await s.unsubscribe()}}
+  else{const p=await Notification.requestPermission();if(p!="granted"){alert("As notificações estão bloqueadas. Libere nas configurações do navegador para este site.");return}
+   const k=(await (await fetch("/api/push/key")).json()).key;const s=await SWR.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b2u(k)});await api(PFX+"/push",s.toJSON())}
+ }catch(e){alert("Não foi possível alterar os avisos: "+e.message)}pushUi()};
+swInit();
 if(TK){start().catch(()=>bye())}
 </script>
 </body>

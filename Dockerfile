@@ -4,8 +4,9 @@ ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 DB_PATH=/data/sdr.db UPLOADS_DIR=/data
 WORKDIR /app
 COPY requirements.txt .
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/* && pip install -r requirements.txt
-COPY server.py dashboard.html atendente.html sdr_prompt.txt sdr_knowledge.md restore_backup.py ./
+COPY server.py dashboard.html atendente.html gestor.html sdr_prompt.txt sdr_knowledge.md restore_backup.py ./
 COPY niches ./niches
+COPY static ./static
 RUN useradd -m -u 10001 sdr && mkdir -p /data && chown sdr /data
 USER sdr
 EXPOSE 8000

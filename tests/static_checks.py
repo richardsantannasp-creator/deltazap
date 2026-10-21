@@ -50,7 +50,7 @@ for m in re.finditer(r'@app\.(get|post|put|delete)\("(/api/[^"]+)"(.*?)\)\n', sr
         if "manager_from_token(x_token)" in body:
             continue
     unauth.append(m.group(2))
-check("todas as rotas /api exigem token (administrador, atendente ou gestor; só os logins são abertos)", not unauth or sorted(unauth) == ["/api/agent/login", "/api/gestor/login"], unauth)
+check("todas as rotas /api exigem token (administrador, atendente ou gestor; só os logins e a chave pública de avisos são abertos)", not unauth or sorted(unauth) == ["/api/agent/login", "/api/gestor/login", "/api/push/key"], unauth)
 
 # 4c) o painel do gestor só chama rotas que existem e os ids batem
 ges = (ROOT / "gestor.html").read_text(encoding="utf-8")

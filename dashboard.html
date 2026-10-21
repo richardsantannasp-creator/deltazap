@@ -276,7 +276,8 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
  <div class="note">O CSV usa ";" como separador e abre direto no Excel. Reuniões agendadas podem ser baixadas em .ics (ou abertas no Google Agenda) na aba Conversas, no lead.</div>
 </div></div></section>
 <section class="col"><h2>Backup e hospedagem <span class="note" id="bs"></span></h2><div class="scroll"><div class="form">
- <div class="row"><button id="bnow">Fazer backup agora</button></div>
+ <div class="row" style="align-items:center"><button id="bnow">Fazer backup agora</button><button class="g" id="bsup">Testar cópia externa</button><button class="g" id="bsend">Enviar cópia agora</button></div>
+ <div class="note" id="bsupi"></div>
  <div class="note" id="binfo"></div>
  <table><thead><tr><th>Backup</th><th>Tamanho</th><th></th></tr></thead><tbody id="blist"></tbody></table>
  <h3 style="margin:14px 0 4px;font-size:14px">Privacidade (LGPD)</h3>
@@ -679,7 +680,12 @@ $("csave").onclick=async()=>{const b={};CK.forEach(k=>b[k]=String($("c_"+k).valu
 // integrações e backup
 const EVN={qualificado:"Qualificado",encaminhado:"Encaminhado ao corretor",reuniao_agendada:"Reunião agendada",humano:"Pediu atendente",descartado:"Descartado/SAIR",sem_resposta:"Sem resposta (fim da retomada)",cotacao_enviada:"Cotação enviada",ganho:"Ganho",perdido:"Perdido"};
 let iEdit=false;
-async function loadInteg(){gcLoad();const g=await api("/api/integrations"),b=await api("/api/backups");
+
+async function loadOff(){try{const o=await api("/api/offsite");$("bsup").classList.toggle("hide",!o.enabled);$("bsend").classList.toggle("hide",!o.enabled);
+ $("bsupi").textContent=o.enabled?`Cópia externa (Supabase, bucket "${o.bucket}"): ${o.last?(o.last.ok?"último envio "+new Date(o.last.ts*1e3).toLocaleString("pt-BR"):"FALHOU: "+o.last.msg):"nenhum envio ainda"} · guarda os ${o.keep} mais recentes`:"Cópia externa não configurada: o backup fica só neste servidor. Veja SUPABASE.md."}catch(e){}}
+$("bsup").onclick=async()=>{$("bsupi").textContent="Testando…";try{const r=await api("/api/offsite/test",{});$("bsupi").textContent=r.ok?"Conexão com o Supabase ok."+(r.warning?" ATENÇÃO: "+r.warning:""):"Erro: "+r.error}catch(e){$("bsupi").textContent=e.message}};
+$("bsend").onclick=async()=>{$("bsend").disabled=true;$("bsupi").textContent="Enviando…";try{await api("/api/offsite/run",{});await loadOff()}catch(e){$("bsupi").textContent="Falhou: "+e.message}finally{$("bsend").disabled=false}};
+async function loadInteg(){gcLoad();loadOff();const g=await api("/api/integrations"),b=await api("/api/backups");
  const sig=JSON.stringify([g.type,g.url,g.events,g.all_events,g.pd_domain,g.hs_pipeline,g.hs_stage_new,g.hs_stage_won,g.hs_stage_lost]);
  if(!$("ievs").children.length||(!iEdit&&sig!=window._isig)){window._isig=sig;if(!iEdit){$("i_type").value=g.type;$("i_url").value=g.url;$("i_secret").value="";$("i_pd_domain").value=g.pd_domain;$("i_pd_token").value="";$("i_hs_token").value="";["pipeline","stage_new","stage_won","stage_lost"].forEach(k=>$("i_hs_"+k).value=g["hs_"+k]);showIType()}$("ievs").innerHTML=g.all_events.map(e=>`<label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" class="iev" value="${e}" ${g.events.includes(e)?"checked":""}> ${EVN[e]||e}</label>`).join("");
   document.querySelectorAll("#v8 .iev").forEach(i=>i.onchange=()=>iEdit=true)}

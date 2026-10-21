@@ -109,6 +109,8 @@ Três recursos para transformar conversa em venda (abas **Avisos**, **Retomada**
 
 **CRM e agenda (aba Integrações).** O sistema envia eventos (qualificado, encaminhado, reunião agendada, pediu atendente, descartado, sem resposta, cotação enviada, ganho, perdido) por webhook, em JSON assinado (cabeçalho `X-SDR-Signature: sha256=...`, HMAC-SHA256 do corpo com o seu segredo), com até 3 tentativas. Serve para n8n, Make, Zapier ou qualquer CRM que aceite webhook. Há também conectores prontos para **Pipedrive** e **HubSpot** (veja abaixo). Também há exportação de leads em CSV (separador `;`, abre no Excel; fórmulas são neutralizadas) e, para reuniões agendadas, arquivo `.ics` e atalho do Google Agenda no lead. O agente registra a reunião como `AAAA-MM-DD HH:MM` (horário de Brasília); se ele escrever a data de outro jeito, o `.ics` não é gerado.
 
+**Cópia externa do backup (Supabase).** O backup diário também é enviado a um bucket privado do Supabase Storage, para sobreviver à perda do servidor. Guia: **SUPABASE.md**.
+
 **Backup e hospedagem.** Backup diário automático (banco + arquivos recebidos) e botão "Fazer backup agora" na aba Integrações; restauração com `python restore_backup.py arquivo.zip`. `/health` para monitoramento. Para colocar no ar com HTTPS, veja **HOSPEDAGEM.md** (Docker + Caddy).
 
 ## Hospedar para clientes e cobrar mensalidade

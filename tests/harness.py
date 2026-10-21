@@ -19,6 +19,7 @@ def _default_lead(system, msgs):
     return f"quero saber mais ({n})"
 EVALSIM = {"lead": _default_lead, "judge_raw": "", "judge_fail": 0}
 AGENT_HOOK = {"fn": None}
+SUPA = {"objects": {}, "calls": [], "fail": 0, "badkey": 0, "nobucket": 0, "public": False}
 GCAL = {"calls": [], "busy": [], "events": {}, "n": 0, "pub": None, "token_fail": 0, "forbidden": 0, "tokens": 0, "fail_create": 0}
 MEDIA = {"sent": [], "graph": [], "window": 0, "fail": 0}
 PAYSIM = {"calls": [], "fail": 0, "badkey": 0, "n": 0}
@@ -99,6 +100,18 @@ class FakeClient:
             try: data = __import__("json").loads(raw or b"{}")
             except ValueError: data = {}
             return FakeResp(st, data)
+        if "supabase.co" in url:
+            p_ = urlparse(url).path; SUPA["calls"].append((method, p_))
+            if SUPA["badkey"] or (headers or {}).get("apikey") != "svc-key": return FakeResp(401, {"message": "Invalid API key"})
+            if SUPA["nobucket"]: return FakeResp(404, {"message": "Bucket not found"})
+            if SUPA["fail"]: return FakeResp(500, {"message": "boom"})
+            if p_.startswith("/storage/v1/object/list/"):
+                return FakeResp(200, [{"name": n} for n in sorted(SUPA["objects"], reverse=True)])
+            if p_.startswith("/storage/v1/bucket/"): return FakeResp(200, {"public": SUPA["public"]})
+            if method == "POST": SUPA["objects"][p_.rsplit("/", 1)[1]] = k.get("content"); return FakeResp(200, {"Key": p_})
+            if method == "DELETE":
+                for n in json["prefixes"]: SUPA["objects"].pop(n, None)
+                return FakeResp(200, [])
         if "googleapis.com" in url:
             return _fake_google(method, url, headers or {}, json, k.get("data"))
         if "graph.facebook.com" in url:

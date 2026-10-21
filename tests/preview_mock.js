@@ -114,6 +114,9 @@ window.fetch=async(url,o)=>{o=o||{};const p=new URL(url,location.href).pathname,
    if(dg.length<10){issues.push({row:i+2,kind:"erro",value:String(r[1]||""),reason:"número curto demais (informe DDD + número)"});return}
    if(seen[ph]){issues.push({row:i+2,kind:"pulado",value:ph,reason:"repetido na planilha"});return}seen[ph]=1;ok.push(ph+";"+String(r[0]||"").trim()+";;")});
   return J({total:rows.length,valid:ok.length,warnings:0,issue_count:issues.length,issues:issues,lines:ok.join("\n"),capped:false,columns:{phone:"WhatsApp",name:"Nome"}})}
+ if(p=="/api/offsite")return J({enabled:true,host:"wdfmfzlliudiohysczwb.supabase.co",bucket:"sdr-backups",keep:30,last:{ts:Date.now()/1e3-7200,ok:true,name:"sdr-demo.zip",msg:"enviado"}});
+ if(p=="/api/offsite/test")return J({ok:true,public:false,warning:""});
+ if(p=="/api/offsite/run")return J({ok:true});
  if(p=="/api/hours")return me=="PUT"?J({ok:true}):J({config:{enabled:true,days:[["09:00","18:00"],["09:00","18:00"],["09:00","18:00"],["09:00","18:00"],["09:00","18:00"],["09:00","12:00"],null],message:"Olá! Nosso atendimento humano funciona {horario}. Sua mensagem ficou registrada e a equipe responde assim que abrir."},status:{enabled:true,open_now:true,text:"de segunda a sexta, das 09:00 às 18:00",next_open:""},day_names:["segunda","terça","quarta","quinta","sexta","sábado","domingo"]});
  if(p=="/api/quick"){if(me=="POST"){QKS.push({id:QKS.length+1,title:b.title,body:b.body});return J({ok:true})}return J(QKS)}
  if(/^\/api\/quick\/\d+$/.test(p)&&me=="DELETE"){const i=+p.split("/").pop();QKS=QKS.filter(x=>x.id!=i);return J({ok:true})}

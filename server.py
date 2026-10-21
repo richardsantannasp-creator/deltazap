@@ -1692,7 +1692,7 @@ def fire(coro):
 # ---------- alertas ----------
 ALERTS_DEFAULT = {"enabled": True, "on_encaminhado": True, "on_humano": True, "on_reuniao": True, "on_resposta": True,
                   "sla_min": 15, "repeat_min": 30, "max_reminders": 3, "start_hour": 8, "end_hour": 20, "whatsapp_to": ""}
-ALERT_TITLES = {"conexao": "📵 WhatsApp fora do ar", "conexao_ok": "✅ WhatsApp reconectado", "encaminhado": "🔔 Novo lead para atendimento", "humano": "🙋 Lead pede atendimento humano", "reuniao": "📅 Reunião agendada",
+ALERT_TITLES = {"backup_externo": "💾 Cópia externa do backup falhou", "conexao": "📵 WhatsApp fora do ar", "conexao_ok": "✅ WhatsApp reconectado", "encaminhado": "🔔 Novo lead para atendimento", "humano": "🙋 Lead pede atendimento humano", "reuniao": "📅 Reunião agendada",
                 "resposta": "💬 O lead respondeu e ainda não foi atendido", "sla": "⏰ Lembrete: lead aguardando atendimento", "teste": "🧪 Alerta de teste", "orcamento": "💸 Orçamento do Claude", "resumo": "📊 Resumo do dia"}
 ALERT_FLAGS = {"encaminhado": "on_encaminhado", "humano": "on_humano", "reuniao": "on_reuniao", "resposta": "on_resposta"}
 
@@ -2757,10 +2757,111 @@ async def maybe_backup():
     last = _f(get_setting("last_backup"), 0)
     if time.time() - last >= 86400:
         try:
-            return await asyncio.to_thread(make_backup)
+            name = await asyncio.to_thread(make_backup)
+            await offsite_after(name)
+            return name
         except Exception as e:
             log("erro", f"backup automático falhou: {e}")
     return None
+
+# ======================================================================
+# v14: cópia dos backups para fora do servidor (Supabase Storage, bucket privado)
+# ======================================================================
+OFFSITE_KEEP = max(1, int(_f(os.getenv("OFFSITE_KEEP"), 30)))
+OFFSITE_MAX = 50_000_000                       # limite de arquivo do plano gratuito do Supabase
+
+def offsite_cfg():
+    url = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+    key = os.getenv("SUPABASE_SERVICE_KEY", "").strip()
+    bucket = os.getenv("SUPABASE_BUCKET", "sdr-backups").strip() or "sdr-backups"
+    ok = bool(url.startswith("https://") and key)
+    return {"enabled": ok, "url": url, "key": key, "bucket": bucket}
+
+def _off_headers(cfg, extra=None):
+    return {"Authorization": f"Bearer {cfg['key']}", "apikey": cfg["key"], **(extra or {})}
+
+def _off_err(r):
+    try:
+        j = r.json(); m = j.get("message") or j.get("error") or ""
+    except Exception:
+        m = r.text[:120]
+    hint = {401: " (chave inválida: use a chave 'service_role')", 403: " (chave sem permissão: use a chave 'service_role')", 404: " (bucket não existe: crie-o em Storage)"}.get(r.status_code, "")
+    return f"Supabase {r.status_code}: {str(m)[:120]}{hint}"
+
+async def offsite_upload(path):
+    """Envia um backup ao bucket e apaga os mais antigos. Devolve (ok, mensagem)."""
+    cfg = offsite_cfg()
+    if not cfg["enabled"]:
+        return False, "Supabase não configurado"
+    path = Path(path)
+    if path.stat().st_size > OFFSITE_MAX:
+        return False, f"backup com {path.stat().st_size // 1_000_000} MB passa do limite de 50 MB do plano gratuito do Supabase"
+    try:
+        async with httpx.AsyncClient(timeout=180) as h:
+            r = await h.post(f"{cfg['url']}/storage/v1/object/{cfg['bucket']}/{path.name}", content=path.read_bytes(),
+                             headers=_off_headers(cfg, {"Content-Type": "application/zip", "x-upsert": "true"}))
+            if r.status_code >= 300:
+                return False, _off_err(r)
+            ls = await h.post(f"{cfg['url']}/storage/v1/object/list/{cfg['bucket']}", headers=_off_headers(cfg),
+                              json={"prefix": "", "limit": 1000, "sortBy": {"column": "name", "order": "desc"}})
+            if ls.status_code < 300:
+                names = sorted((o["name"] for o in ls.json() if BACKUP_RE.match(o.get("name", ""))), reverse=True)
+                old = names[OFFSITE_KEEP:]
+                if old:
+                    await h.request("DELETE", f"{cfg['url']}/storage/v1/object/{cfg['bucket']}", headers=_off_headers(cfg), json={"prefixes": old})
+    except Exception as e:
+        return False, f"sem conexão com o Supabase: {str(e)[:100]}"
+    return True, "enviado"
+
+async def offsite_after(name):
+    if not offsite_cfg()["enabled"]:
+        return
+    ok, msg = await offsite_upload(BACKUP_DIR / name)
+    set_setting("offsite_last", json.dumps({"ts": time.time(), "ok": ok, "name": name, "msg": msg}))
+    if ok:
+        log("backup", f"cópia externa enviada ao Supabase: {name}")
+    else:
+        log("erro", f"cópia externa do backup falhou: {msg}")
+        fire(notify("backup_externo", "", msg[:200], only=("email", "webhook")))
+
+@app.get("/api/offsite", dependencies=[Depends(auth)])
+async def offsite_status():
+    cfg = offsite_cfg()
+    try:
+        last = json.loads(get_setting("offsite_last") or "null")
+    except ValueError:
+        last = None
+    return {"enabled": cfg["enabled"], "host": cfg["url"].replace("https://", ""), "bucket": cfg["bucket"], "keep": OFFSITE_KEEP, "last": last}
+
+@app.post("/api/offsite/test", dependencies=[Depends(auth)])
+async def offsite_test():
+    cfg = offsite_cfg()
+    if not cfg["enabled"]:
+        raise HTTPException(400, "Defina SUPABASE_URL e SUPABASE_SERVICE_KEY no .env do servidor e reinicie")
+    try:
+        async with httpx.AsyncClient(timeout=20) as h:
+            r = await h.post(f"{cfg['url']}/storage/v1/object/list/{cfg['bucket']}", headers=_off_headers(cfg), json={"prefix": "", "limit": 1})
+            pub = await h.get(f"{cfg['url']}/storage/v1/bucket/{cfg['bucket']}", headers=_off_headers(cfg))
+    except Exception as e:
+        return {"ok": False, "error": f"sem conexão com o Supabase: {str(e)[:100]}"}
+    if r.status_code >= 300:
+        return {"ok": False, "error": _off_err(r)}
+    is_public = False
+    try:
+        is_public = bool(pub.json().get("public"))
+    except Exception:
+        pass
+    return {"ok": True, "public": is_public, "warning": "O bucket está PÚBLICO: os backups têm dados pessoais. Torne-o privado em Storage > bucket > Edit." if is_public else ""}
+
+@app.post("/api/offsite/run", dependencies=[Depends(auth)])
+async def offsite_run():
+    bk = list_backups()
+    name = bk[0]["name"] if bk else await asyncio.to_thread(make_backup)
+    await offsite_after(name)
+    last = json.loads(get_setting("offsite_last") or "{}")
+    if not last.get("ok"):
+        raise HTTPException(502, last.get("msg") or "falha ao enviar")
+    return {"ok": True, "name": name}
 
 @app.get("/api/backups", dependencies=[Depends(auth)])
 async def backups_list():
@@ -2769,7 +2870,9 @@ async def backups_list():
 @app.post("/api/backups", dependencies=[Depends(auth)])
 async def backups_create():
     try:
-        return {"name": await asyncio.to_thread(make_backup)}
+        name = await asyncio.to_thread(make_backup)
+        await offsite_after(name)
+        return {"name": name}
     except Exception as e:
         log("erro", f"backup: {e}")
         raise HTTPException(500, "Não foi possível criar o backup: " + str(e)[:120])
@@ -3575,6 +3678,16 @@ async def run_diagnostics():
     out.append(_chk("disco", "Espaço em disco", "ok" if du.free > 2e9 else "aviso", f"{du.free / 1e9:.1f} GB livres", "" if du.free > 2e9 else "Libere espaço: o banco, os anexos e os backups crescem."))
     bk = list_backups()
     age = (time.time() - bk[0]["ts"]) / 3600 if bk else None
+    if offsite_cfg()["enabled"]:
+        try:
+            lo = json.loads(get_setting("offsite_last") or "null")
+        except ValueError:
+            lo = None
+        out.append(_chk("offsite", "Cópia externa do backup (Supabase)", "ok" if lo and lo["ok"] else "aviso",
+                        f"último envio {datetime.fromtimestamp(lo['ts'], TZ):%d/%m %H:%M}" if lo and lo["ok"] else (lo["msg"] if lo else "nenhum envio ainda"),
+                        "" if lo and lo["ok"] else "Clique em 'Enviar cópia agora' (Integrações) ou confira SUPABASE_URL, a chave service_role e o bucket."))
+    else:
+        out.append(_chk("offsite", "Cópia externa do backup", "aviso", "não configurada", "Recomendado: configure o Supabase (veja SUPABASE.md) para o backup sobreviver à perda do servidor."))
     out.append(_chk("backup", "Backup", "ok" if bk and age < 48 else "aviso", f"último há {age:.0f} h ({len(bk)} guardados)" if bk else "nenhum backup ainda",
                     "" if bk and age < 48 else "Faça um backup na aba Integrações e copie para fora do servidor (o backup fica na mesma máquina)."))
     if gcal_cfg()["enabled"]:

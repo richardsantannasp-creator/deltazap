@@ -35,9 +35,13 @@ else
 fi
 
 say "3/5 dependências"
-[ -d .venv ] && PIP=".venv/bin/pip" || PIP="pip"
-$PIP install -q -r requirements.txt || say "aviso: pip falhou"
-[ -d gateway ] && (cd gateway && npm install --omit=dev --silent || say "aviso: npm falhou")
+if [ -f docker-compose.yml ] && command -v docker >/dev/null 2>&1; then
+  say "(Docker: as dependências são instaladas ao reconstruir a imagem)"
+else
+  [ -d .venv ] && PIP=".venv/bin/pip" || PIP="pip"
+  $PIP install -q -r requirements.txt || say "aviso: pip falhou"
+  [ -d gateway ] && (cd gateway && npm install --omit=dev --silent || say "aviso: npm falhou")
+fi
 
 say "4/5 reiniciando"
 reiniciar; R=$?

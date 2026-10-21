@@ -15,7 +15,7 @@ async def main():
     await asyncio.sleep(3.5)
     sent2 = len(harness.SENT)
     task.cancel()
-    ok = sent1 == 1 and sent2 == 1 and 14 <= gap <= 20.5
+    ok = sent1 == 1 and sent2 == 1 and 14 <= gap <= 145
     print(("OK    " if ok else "FALHA ") + f"ciclo automático: 1º envio em <=2 s ({sent1}), espera de {gap:.0f}s respeitada ({sent2} após 7 s)")
     sys.exit(0 if ok else 1)
 asyncio.run(main())

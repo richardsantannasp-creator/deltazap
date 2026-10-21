@@ -681,6 +681,35 @@ const step = async (name, fn) => {
     await ctx2.close()
   })
 
+  // ---------- gestor de equipe ----------
+  await step('Gestor: administrador cria o acesso; gestor entra, cria a própria equipe e vê o isolamento', async () => {
+    await page.click('#t5'); await page.waitForSelector('#gm_name')
+    await page.fill('#gm_name', 'Gil Gestor'); await page.fill('#gm_login', 'gil'); await page.fill('#gm_pw', 'gil-123456'); await page.fill('#gm_ml', '1'); await page.fill('#gm_ma', '3'); await page.click('#gm_add')
+    await until(async () => (await page.textContent('#gm_msg')).includes('Usuário: gil'), 6000, 'aviso de gestor criado')
+    await until(async () => (await page.innerText('#gm_list')).includes('Gil Gestor'), 6000, 'gestor na lista')
+    expect((await page.textContent('#gm_url')).endsWith('/gestor'), 'endereço do painel do gestor')
+    const ctx3 = await browser.newContext(); const gp = await ctx3.newPage()
+    const errs = []; gp.on('pageerror', (e) => errs.push(String(e.message || e))); gp.on('dialog', (d) => d.accept())
+    await gp.goto(BASE + '/gestor')
+    await gp.fill('#lg', 'gil'); await gp.fill('#pw', 'errada'); await gp.click('#lbtn')
+    await until(async () => (await gp.textContent('#lerr')).includes('incorretos'), 5000, 'erro de senha')
+    await gp.fill('#pw', 'gil-123456'); await gp.click('#lbtn')
+    await until(async () => await gp.isVisible('#app'), 6000, 'painel do gestor aberto')
+    await until(async () => (await gp.textContent('#who')).includes('Gil Gestor'), 6000, 'nome do gestor')
+    expect(!(await gp.innerText('#ll')).includes('Marcos'), 'gestor não vê conversas do administrador')
+    await gp.click('#tabs button[data-t="team"]'); await gp.waitForSelector('#an')
+    await gp.fill('#an', 'Duda Equipe'); await gp.fill('#al', 'duda'); await gp.fill('#ap', 'duda-123456'); await gp.click('#aadd')
+    await until(async () => (await gp.textContent('#amsg')).includes('Usuário: duda'), 6000, 'atendente criado pelo gestor')
+    await until(async () => (await gp.innerText('#tl')).includes('Duda Equipe'), 6000, 'atendente na lista do gestor')
+    expect(!(await gp.innerText('#tl')).includes('Rita'), 'gestor não vê atendentes do administrador')
+    await gp.click('#tabs button[data-t="perf"]'); await until(async () => (await gp.innerText('#pm')).includes('Duda Equipe'), 6000, 'desempenho da equipe do gestor')
+    await gp.click('#tabs button[data-t="wa"]'); await until(async () => await gp.isVisible('#addl'), 6000, 'adicionar número')
+    await page.click('#t5'); await until(async () => (await page.innerText('#tm_list')).includes('gestor: Gil Gestor'), 8000, 'administrador vê o atendente com a etiqueta do gestor')
+    expect(errs.length === 0, 'erros JS no painel do gestor: ' + errs.join('; '))
+    await gp.click('#out'); await until(async () => await gp.isVisible('#login'), 4000, 'voltou ao login')
+    await ctx3.close()
+  })
+
   // ---------- 7. saúde geral ----------
   await step('sem erros de JavaScript e sem respostas 5xx no navegador', async () => {
     const ignorar = /Confirme que|Defina o nicho|Informe o número|Informe de onde veio|Erro/i

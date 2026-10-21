@@ -45,8 +45,23 @@ for m in re.finditer(r'@app\.(get|post|put|delete)\("(/api/[^"]+)"(.*?)\)\n', sr
         body = srv[m.end():m.end() + 400]
         if "agent_from_token(x_token)" in body:
             continue
+    if m.group(2).startswith("/api/gestor/") and m.group(2) != "/api/gestor/login":      # rotas do gestor: sessão própria
+        body = srv[m.end():m.end() + 400]
+        if "manager_from_token(x_token)" in body:
+            continue
     unauth.append(m.group(2))
-check("todas as rotas /api exigem token (administrador ou sessão de atendente; só o login é aberto)", not unauth or unauth == ["/api/agent/login"], unauth)
+check("todas as rotas /api exigem token (administrador, atendente ou gestor; só os logins são abertos)", not unauth or sorted(unauth) == ["/api/agent/login", "/api/gestor/login"], unauth)
+
+# 4c) o painel do gestor só chama rotas que existem e os ids batem
+ges = (ROOT / "gestor.html").read_text(encoding="utf-8")
+gcalls = {re.sub(r"\$\{[^}]+\}", "X", m.group(1)) for m in re.finditer(r'["`](/api/gestor/[A-Za-z/${}_.\-]*)', ges)}
+gpats = [re.compile("^" + re.sub(r"\{[^}]+\}", "[^/]+", re.sub(r"/$", "", pth)) + "/?$") for pth in re.findall(r'@app\.\w+\("(/api/gestor/[^"]+)"', srv)]
+gmiss = sorted(c for c in gcalls if not any(p_.match(c.rstrip("/")) or p_.match(c.rstrip("/") + "/X") for p_ in gpats))
+check(f"as {len(gcalls)} chamadas do painel do gestor têm rota no servidor", gcalls and not gmiss, gmiss)
+gids = re.findall(r'id="([^"]+)"', ges)
+check("gestor.html: ids únicos", len(gids) == len(set(gids)), [i for i in set(gids) if gids.count(i) > 1])
+gused = set(re.findall(r'\$\("([^"]+)"\)', ges))
+check("gestor.html: todo $(\"id\") existe", not (gused - set(gids)), sorted(gused - set(gids)))
 
 # 4b) o painel do atendente só chama rotas que existem
 att = (ROOT / "atendente.html").read_text(encoding="utf-8")

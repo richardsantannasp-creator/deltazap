@@ -54,6 +54,9 @@ O agente consulta horários livres e cria o evento de verdade em uma agenda do G
 - **Janela de 24 h (API oficial)**: depois de 24 h sem resposta do lead, a Meta só aceita template aprovado (erro 131047). O sistema marca a mensagem como "não enviada" na conversa, registra um aviso e, em envios manuais/de atendente, devolve erro 409 explicando. No modo QR não existe essa janela.
 - **Recebidos**: localização (vira texto com link do mapa), contato compartilhado e resposta de botão/lista viram texto para o agente; reações com emoji são ignoradas; figurinhas continuam como aviso.
 
+## Gestor de equipe (acesso próprio, número próprio, equipe própria)
+O administrador cria gestores em **Avisos > Gestores de equipe** (limites de números e de atendentes por gestor). O gestor entra em `/gestor`, conecta o WhatsApp dele, cria os atendentes dele e atende as conversas dos números dele, sem ver nada de outros. Transferências em números do gestor só vão para a equipe dele, e os números dos gestores nunca entram nos disparos do administrador. Detalhes em `GESTOR.md`.
+
 ## Transferência para atendente humano (equipe logada)
 - **Equipe:** na aba **Avisos > Equipe de atendimento** você cadastra atendentes (nome, usuário, senha, máximo de conversas simultâneas). Eles entram em `https://SEU-DOMINIO/atendente` (página separada: só vê as próprias conversas e a fila, nada de configurações). A senha gerada aparece uma única vez; dá para trocar, desativar ou excluir a qualquer momento.
 - **Quando transfere:** a IA transfere sozinha (lead pede uma pessoa, reclama, foge do escopo) ou você clica em **Enviar à equipe** no chat. A IA pausa e a conversa vai para o atendente **disponível** com menos conversas (empate: quem recebeu há mais tempo). Se ninguém estiver disponível, ela fica na **fila**, e a IA avisa o lead com honestidade que a equipe responde assim que possível, sem prometer prazo.

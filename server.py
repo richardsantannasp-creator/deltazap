@@ -1424,17 +1424,21 @@ async def outbox_tick():
     with conn() as c:
         queued = [dict(r) for r in c.execute("SELECT * FROM outbox WHERE status='queued' ORDER BY id LIMIT 300")]
     item = line = None
+    lmm = line_mgr_map()
+    aready = [l for l in ready if lmm.get(l, 0) == 0]      # envios sem número definido só saem pelos números do administrador, nunca pelos dos gestores
     for it in queued:
         want = it.get("line") or ""
         if want and want in act:
             if want in ready:
                 item, line = it, want
                 break
-        elif want:                                   # a linha foi removida: qualquer número pode assumir
-            item, line = it, min(ready, key=lambda l: (sent.get(l, 0), l))
+        elif not aready:
+            continue
+        elif want:                                   # a linha foi removida: qualquer número do administrador pode assumir
+            item, line = it, min(aready, key=lambda l: (sent.get(l, 0), l))
             break
         else:
-            item, line = it, min(ready, key=lambda l: (sent.get(l, 0), l))
+            item, line = it, min(aready, key=lambda l: (sent.get(l, 0), l))
             break
     if not item:
         return
@@ -3071,8 +3075,9 @@ def line_open(line):
 
 def internal_line():
     """Número usado para avisos internos (corretor/gestor): o primeiro conectado, começando pela principal."""
+    lmm = line_mgr_map()
     for ln in active_lines():
-        if line_open(ln):
+        if line_open(ln) and lmm.get(ln, 0) == 0:
             return ln
     return "main"
 
@@ -3742,6 +3747,31 @@ def migrate_v9():
         add("leads", "handoff_reason", "TEXT DEFAULT ''"); add("messages", "agent", "TEXT DEFAULT ''")
 migrate_v9()
 
+def migrate_v15():
+    """Gestores de equipe: cada gestor tem login, número(s) de WhatsApp e atendentes próprios."""
+    with conn() as c:
+        def add(table, col, ddl):
+            if col not in {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+        c.executescript("""
+        CREATE TABLE IF NOT EXISTS managers(id INTEGER PRIMARY KEY AUTOINCREMENT, login TEXT UNIQUE, name TEXT, pw TEXT, active INTEGER DEFAULT 1,
+          max_lines INTEGER DEFAULT 1, max_agents INTEGER DEFAULT 10, last_seen REAL DEFAULT 0, created REAL);
+        CREATE TABLE IF NOT EXISTS manager_sessions(th TEXT PRIMARY KEY, manager_id INTEGER, created REAL, expires REAL);
+        """)
+        add("lines", "manager_id", "INTEGER DEFAULT 0"); add("agents", "manager_id", "INTEGER DEFAULT 0")
+migrate_v15()
+
+def line_mgr_map():
+    with conn() as c:
+        return {r["id"]: (r["manager_id"] or 0) for r in c.execute("SELECT id, manager_id FROM lines")}
+
+def lead_manager(phone, lm=None):
+    """Gestor dono da conversa (pelo número de WhatsApp em que ela acontece). 0 = administrador."""
+    lm = lm if lm is not None else line_mgr_map()
+    with conn() as c:
+        r = c.execute("SELECT line FROM leads WHERE phone=?", (phone,)).fetchone()
+    return lm.get((r["line"] if r else "") or "main", 0)
+
 def hand_cfg():
     cfg = dict(HANDOFF_DEFAULT)
     try:
@@ -3764,9 +3794,11 @@ def pw_ok(pw, stored):
 def tok_hash(t):
     return hashlib.sha256(("agt:" + t).encode()).hexdigest()
 
-def agents_active_count():
+def agents_active_count(mid=None):
     with conn() as c:
-        return c.execute("SELECT COUNT(*) n FROM agents WHERE active=1").fetchone()["n"]
+        if mid is None:
+            return c.execute("SELECT COUNT(*) n FROM agents WHERE active=1").fetchone()["n"]
+        return c.execute("SELECT COUNT(*) n FROM agents WHERE active=1 AND manager_id=?", (mid,)).fetchone()["n"]
 
 def agent_from_token(tok):
     """Atendente da sessão (renova o 'visto por último'). 401 se a sessão não existe ou venceu."""
@@ -3789,15 +3821,17 @@ def agent_public(a, now=None):
     now = now or time.time()
     online = bool(a["active"] and a["available"] and now - (a["last_seen"] or 0) < ONLINE_S)
     return {"id": a["id"], "login": a["login"], "name": a["name"], "active": bool(a["active"]), "available": bool(a["available"]),
-            "online": online, "present": bool(now - (a["last_seen"] or 0) < ONLINE_S), "max_chats": a["max_chats"], "load": agent_load(a["id"])}
+            "online": online, "present": bool(now - (a["last_seen"] or 0) < ONLINE_S), "max_chats": a["max_chats"], "load": agent_load(a["id"]),
+            "manager_id": a.get("manager_id") or 0}
 
 def assign_next(phone, exclude=()):
     """Entrega a conversa ao atendente disponível com menos conversas (empate: quem recebeu há mais tempo). None = ninguém disponível."""
     cfg = hand_cfg(); now = time.time()
     if not cfg["auto_assign"]:
         return None
+    mid = lead_manager(phone)        # a conversa só vai para atendentes da equipe do dono do número
     with conn() as c:
-        rows = [dict(r) for r in c.execute("SELECT * FROM agents WHERE active=1 AND available=1 AND last_seen>?", (now - ONLINE_S,))]
+        rows = [dict(r) for r in c.execute("SELECT * FROM agents WHERE active=1 AND available=1 AND manager_id=? AND last_seen>?", (mid, now - ONLINE_S))]
     cands = []
     for r in rows:
         if r["id"] in exclude:
@@ -3821,7 +3855,7 @@ def handoff_begin(phone, reason, source="ia", exclude=()):
     """Coloca a conversa na fila de atendimento humano e tenta entregar a alguém online. Devolve o texto para o agente de IA dizer ao lead."""
     set_lead(phone, human=1, stage="humano", agent_id=None, handoff_at=time.time(), assigned_at=None, first_reply_at=None, handoff_reason=str(reason or "")[:300])
     ooh = hours_note_for_agent()
-    if not agents_active_count():
+    if not agents_active_count(lead_manager(phone)):
         return "Transferido. Avise o lead que uma pessoa vai assumir a conversa." + ooh
     a = assign_next(phone, exclude)
     if a:
@@ -3830,9 +3864,13 @@ def handoff_begin(phone, reason, source="ia", exclude=()):
     return ("Transferido para a fila da equipe: no momento ninguém está disponível. Avise o lead, com honestidade, que a equipe responde assim que possível "
             "(não prometa prazo) e que tudo o que ele contou já está registrado. Não faça mais perguntas." + ooh)
 
-def queue_rows():
+def queue_rows(mid=None):
     with conn() as c:
-        return [dict(r) for r in c.execute("SELECT * FROM leads WHERE human=1 AND agent_id IS NULL AND test=0 AND outcome='' ORDER BY COALESCE(handoff_at,created)")]
+        rows = [dict(r) for r in c.execute("SELECT * FROM leads WHERE human=1 AND agent_id IS NULL AND test=0 AND outcome='' ORDER BY COALESCE(handoff_at,created)")]
+    if mid is None:
+        return rows
+    lm = line_mgr_map()
+    return [r for r in rows if lm.get(r.get("line") or "main", 0) == mid]
 
 async def handoff_sweep():
     """Roda a cada minuto e quando um atendente fica disponível: entrega a fila, devolve conversas de quem sumiu, e aplica o prazo da fila."""
@@ -4340,11 +4378,12 @@ async def agent_notes_add(phone: str, b: TextIn, x_token: str = Header(default="
     return _add_note(phone, a["name"], b.text)
 
 # ---- métricas por atendente
-def agent_metrics(days=30):
+def agent_metrics(days=30, mid=None):
     days = max(1, min(int(days or 30), 365)); since = time.time() - days * 86400
     out = []
     with conn() as c:
-        for a in c.execute("SELECT id,name,active FROM agents ORDER BY name").fetchall():
+        q_ag = c.execute("SELECT id,name,active FROM agents ORDER BY name").fetchall() if mid is None else c.execute("SELECT id,name,active FROM agents WHERE manager_id=? ORDER BY name", (mid,)).fetchall()
+        for a in q_ag:
             handled = c.execute("SELECT COUNT(DISTINCT phone) n, COUNT(*) m FROM messages WHERE role='humano' AND agent=? AND ts>?", (a["name"], since)).fetchone()
             waits = [r["w"] for r in c.execute("SELECT first_reply_at-COALESCE(assigned_at,handoff_at) w FROM leads WHERE agent_id=? AND first_reply_at IS NOT NULL AND first_reply_at>? AND first_reply_at>=COALESCE(assigned_at,handoff_at,0)", (a["id"], since))]
             queue = [r["w"] for r in c.execute("SELECT assigned_at-handoff_at w FROM leads WHERE agent_id=? AND assigned_at>? AND handoff_at IS NOT NULL AND assigned_at>=handoff_at", (a["id"], since))]
@@ -4397,7 +4436,7 @@ async def agent_logout(x_token: str = Header(default="")):
 async def agent_me(x_token: str = Header(default="")):
     a = agent_from_token(x_token)
     mine = next((x for x in agent_metrics(7) if x["id"] == a["id"]), None)
-    return {"agent": agent_public(a), "queue": len(queue_rows()), "team": [agent_public(r) for r in _all_agents() if r["active"]], "hours": hours_status(), "stats7": mine}
+    return {"agent": agent_public(a), "queue": len(queue_rows(a.get("manager_id") or 0)), "team": [agent_public(r) for r in _all_agents() if r["active"] and (r.get("manager_id") or 0) == (a.get("manager_id") or 0)], "hours": hours_status(), "stats7": mine}
 
 def _all_agents():
     with conn() as c:
@@ -4422,7 +4461,7 @@ def _agent_lead(phone, a, allow_queue=False):
         raise HTTPException(404, "Lead não encontrado")
     if lead["agent_id"] == a["id"]:
         return lead
-    if allow_queue and lead["human"] and lead["agent_id"] is None:
+    if allow_queue and lead["human"] and lead["agent_id"] is None and lead_manager(phone) == (a.get("manager_id") or 0):
         return lead
     raise HTTPException(403, "Esta conversa não está com você")
 
@@ -4430,7 +4469,7 @@ def _agent_lead(phone, a, allow_queue=False):
 async def agent_leads(x_token: str = Header(default="")):
     a = agent_from_token(x_token)
     with conn() as c:
-        rows = c.execute("""SELECT l.phone,l.name,l.company,l.stage,l.bant,l.meeting,l.agent_id,l.handoff_at,l.assigned_at,l.handoff_reason,l.outcome,l.origin,l.test,
+        rows = c.execute("""SELECT l.phone,l.line,l.name,l.company,l.stage,l.bant,l.meeting,l.agent_id,l.handoff_at,l.assigned_at,l.handoff_reason,l.outcome,l.origin,l.test,
             n.name AS niche,
             (SELECT COUNT(*) FROM messages m WHERE m.phone=l.phone AND m.role='lead' AND m.id>COALESCE((SELECT MAX(id) FROM messages WHERE phone=l.phone AND role='humano'),0)) AS unread,
             (SELECT text FROM messages m WHERE m.phone=l.phone ORDER BY id DESC LIMIT 1) AS last_text,
@@ -4438,6 +4477,8 @@ async def agent_leads(x_token: str = Header(default="")):
             FROM leads l LEFT JOIN niches n ON n.id=l.niche_id
             WHERE l.human=1 AND (l.agent_id=? OR l.agent_id IS NULL) AND l.test=0 AND (l.outcome='' OR l.agent_id=?)
             ORDER BY COALESCE(l.handoff_at,l.created)""", (a["id"], a["id"])).fetchall()
+    lm, mid = line_mgr_map(), a.get("manager_id") or 0
+    rows = [r for r in rows if r["agent_id"] == a["id"] or lm.get(r["line"] or "main", 0) == mid]
     return {"leads": [dict(r) for r in rows], "agent": agent_public(a)}
 
 @app.get("/api/agent/messages/{phone}")
@@ -4471,7 +4512,7 @@ async def agent_send(phone: str, b: TextIn2, x_token: str = Header(default="")):
 async def agent_claim(phone: str, x_token: str = Header(default="")):
     a = agent_from_token(x_token)
     lead = get_lead(phone)
-    if not lead or not lead["human"]:
+    if not lead or not lead["human"] or lead_manager(phone) != (a.get("manager_id") or 0):
         raise HTTPException(404, "Esta conversa não está aguardando atendimento")
     with conn() as c:
         cur = c.execute("UPDATE leads SET agent_id=?, assigned_at=?, handled_at=? WHERE phone=? AND human=1 AND (agent_id IS NULL OR agent_id=?)", (a["id"], time.time(), time.time(), phone, a["id"]))
@@ -4506,7 +4547,7 @@ async def agent_transfer(phone: str, b: TransferIn, x_token: str = Header(defaul
     except ValueError:
         raise HTTPException(400, "destino inválido")
     with conn() as c:
-        t = c.execute("SELECT * FROM agents WHERE id=? AND active=1", (tid,)).fetchone()
+        t = c.execute("SELECT * FROM agents WHERE id=? AND active=1 AND manager_id=?", (tid, a.get("manager_id") or 0)).fetchone()
     if not t:
         raise HTTPException(404, "Atendente não encontrado")
     set_lead(phone, agent_id=tid, assigned_at=time.time(), handoff_reason=f"transferida por {a['name']}"[:300])
@@ -4558,6 +4599,9 @@ async def agents_list():
 
 @app.post("/api/agents", dependencies=[Depends(auth)])
 async def agents_add(b: AgentIn):
+    return _agent_create(b, 0)
+
+def _agent_create(b, mid):
     lg = re.sub(r"\s+", "", (b.login or "")).lower()[:80]
     name = (b.name or "").strip()[:60]
     if not lg or not name:
@@ -4567,7 +4611,7 @@ async def agents_add(b: AgentIn):
         raise HTTPException(400, "A senha precisa ter pelo menos 6 caracteres")
     try:
         with conn() as c:
-            c.execute("INSERT INTO agents(login,name,pw,max_chats,created) VALUES(?,?,?,?,?)", (lg, name, pw_hash(pw), max(1, min(50, b.max_chats)), time.time()))
+            c.execute("INSERT INTO agents(login,name,pw,max_chats,created,manager_id) VALUES(?,?,?,?,?,?)", (lg, name, pw_hash(pw), max(1, min(50, b.max_chats)), time.time(), mid))
     except sqlite3.IntegrityError:
         raise HTTPException(400, "Já existe um atendente com este usuário")
     log("humano", f"atendente {name} criado")
@@ -5704,4 +5748,281 @@ async def eval_del(rid: int):
         raise HTTPException(400, "Aguarde a avaliação terminar")
     with conn() as c:
         c.execute("DELETE FROM eval_runs WHERE id=?", (rid,))
+    return {"ok": True}
+
+# ======================================================================
+# v15: gestor de equipe (login próprio, número de WhatsApp próprio, atendentes próprios)
+# O administrador (DASH_TOKEN) vê tudo. O gestor só enxerga o que é dele: os números que ele conectou,
+# as conversas desses números e os atendentes que ele criou. Conversas transferidas por esses números
+# só vão para atendentes da equipe dele.
+# ======================================================================
+def mtok_hash(t):
+    return hashlib.sha256(("mgr:" + t).encode()).hexdigest()
+
+def manager_from_token(tok):
+    if not tok:
+        raise HTTPException(401, "sessão inválida")
+    now = time.time()
+    with conn() as c:
+        r = c.execute("SELECT m.* FROM manager_sessions s JOIN managers m ON m.id=s.manager_id WHERE s.th=? AND s.expires>? AND m.active=1", (mtok_hash(tok), now)).fetchone()
+        if not r:
+            raise HTTPException(401, "sessão inválida ou vencida: entre de novo")
+        c.execute("UPDATE managers SET last_seen=? WHERE id=?", (now, r["id"]))
+    return dict(r)
+
+def manager_public(m):
+    return {"id": m["id"], "login": m["login"], "name": m["name"], "active": bool(m["active"]), "max_lines": m["max_lines"], "max_agents": m["max_agents"]}
+
+def mgr_line_ids(mid):
+    with conn() as c:
+        return [r["id"] for r in c.execute("SELECT id FROM lines WHERE manager_id=? ORDER BY created, id", (mid,))]
+
+def mgr_own_line(m, line):
+    if line not in mgr_line_ids(m["id"]):
+        raise HTTPException(404, "Número não encontrado")
+
+def mgr_own_agent(m, aid):
+    with conn() as c:
+        a = c.execute("SELECT * FROM agents WHERE id=? AND manager_id=?", (aid, m["id"])).fetchone()
+    if not a:
+        raise HTTPException(404, "Atendente não encontrado")
+    return dict(a)
+
+def mgr_own_lead(m, phone):
+    lead = get_lead(phone)
+    if not lead or lead_manager(phone) != m["id"]:
+        raise HTTPException(404, "Conversa não encontrada")
+    return lead
+
+class ManagerIn(BaseModel):
+    login: str = ""
+    name: str = ""
+    password: str = ""
+    max_lines: int = 1
+    max_agents: int = 10
+    active: bool = True
+
+# ---- cadastro pelo administrador ----
+@app.get("/api/managers", dependencies=[Depends(auth)])
+async def managers_list():
+    with conn() as c:
+        ms = [dict(r) for r in c.execute("SELECT * FROM managers ORDER BY name")]
+        lines = c.execute("SELECT manager_id, COUNT(*) n FROM lines WHERE manager_id>0 GROUP BY manager_id").fetchall()
+        ags = c.execute("SELECT manager_id, COUNT(*) n FROM agents WHERE manager_id>0 GROUP BY manager_id").fetchall()
+    nl, na, now = {r["manager_id"]: r["n"] for r in lines}, {r["manager_id"]: r["n"] for r in ags}, time.time()
+    return {"managers": [{**manager_public(m), "lines": nl.get(m["id"], 0), "agents": na.get(m["id"], 0),
+                          "online": bool(now - (m["last_seen"] or 0) < ONLINE_S)} for m in ms], "url": "/gestor"}
+
+@app.post("/api/managers", dependencies=[Depends(auth)])
+async def managers_add(b: ManagerIn):
+    lg = re.sub(r"\s+", "", (b.login or "")).lower()[:80]
+    name = (b.name or "").strip()[:60]
+    if not lg or not name:
+        raise HTTPException(400, "Informe o nome e o usuário (e-mail ou apelido) do gestor")
+    pw = (b.password or "").strip() or secrets.token_urlsafe(8)
+    if len(pw) < 8:
+        raise HTTPException(400, "A senha do gestor precisa ter pelo menos 8 caracteres")
+    try:
+        with conn() as c:
+            c.execute("INSERT INTO managers(login,name,pw,max_lines,max_agents,created) VALUES(?,?,?,?,?,?)",
+                      (lg, name, pw_hash(pw), max(1, min(LINES_MAX, b.max_lines)), max(1, min(100, b.max_agents)), time.time()))
+    except sqlite3.IntegrityError:
+        raise HTTPException(400, "Já existe um gestor com este usuário")
+    log("humano", f"gestor {name} criado")
+    return {"ok": True, "login": lg, "password": pw}          # a senha só aparece agora
+
+@app.put("/api/managers/{mid}", dependencies=[Depends(auth)])
+async def managers_edit(mid: int, b: ManagerIn):
+    with conn() as c:
+        m = c.execute("SELECT * FROM managers WHERE id=?", (mid,)).fetchone()
+        if not m:
+            raise HTTPException(404, "Gestor não encontrado")
+        if (b.password or "").strip() and len(b.password.strip()) < 8:
+            raise HTTPException(400, "A senha do gestor precisa ter pelo menos 8 caracteres")
+        c.execute("UPDATE managers SET name=?, max_lines=?, max_agents=?, active=? WHERE id=?",
+                  ((b.name or m["name"]).strip()[:60], max(1, min(LINES_MAX, b.max_lines)), max(1, min(100, b.max_agents)), int(b.active), mid))
+        if (b.password or "").strip():
+            c.execute("UPDATE managers SET pw=? WHERE id=?", (pw_hash(b.password.strip()), mid))
+            c.execute("DELETE FROM manager_sessions WHERE manager_id=?", (mid,))
+        if not b.active:
+            c.execute("DELETE FROM manager_sessions WHERE manager_id=?", (mid,))
+    return {"ok": True}
+
+@app.delete("/api/managers/{mid}", dependencies=[Depends(auth)])
+async def managers_del(mid: int):
+    """Exclui o acesso do gestor. Os números e atendentes dele passam para o administrador (nada é apagado)."""
+    with conn() as c:
+        if not c.execute("SELECT 1 FROM managers WHERE id=?", (mid,)).fetchone():
+            raise HTTPException(404, "Gestor não encontrado")
+        c.execute("UPDATE lines SET manager_id=0 WHERE manager_id=?", (mid,))
+        c.execute("UPDATE agents SET manager_id=0 WHERE manager_id=?", (mid,))
+        c.execute("DELETE FROM manager_sessions WHERE manager_id=?", (mid,))
+        c.execute("DELETE FROM managers WHERE id=?", (mid,))
+    log("humano", f"gestor {mid} excluído; números e atendentes passaram para o administrador")
+    return {"ok": True}
+
+# ---- API do próprio gestor ----
+@app.get("/gestor", response_class=HTMLResponse)
+async def gestor_page():
+    return (HERE / "gestor.html").read_text(encoding="utf-8")
+
+@app.post("/api/gestor/login")
+async def gestor_login(b: AgentLoginIn):
+    lg = (b.login or "").strip().lower()[:80]
+    now = time.time()
+    key = "m:" + lg
+    fails = [t for t in LOGIN_FAILS.get(key, []) if now - t < 600]
+    if len(fails) >= 5:
+        raise HTTPException(429, "Muitas tentativas. Aguarde 10 minutos.")
+    with conn() as c:
+        m = c.execute("SELECT * FROM managers WHERE login=? AND active=1", (lg,)).fetchone()
+    if not m or not pw_ok(b.password or "", m["pw"]):
+        LOGIN_FAILS[key] = fails + [now]
+        raise HTTPException(401, "Usuário ou senha incorretos")
+    LOGIN_FAILS.pop(key, None)
+    tok = secrets.token_urlsafe(32)
+    with conn() as c:
+        c.execute("DELETE FROM manager_sessions WHERE expires<?", (now,))
+        c.execute("INSERT INTO manager_sessions(th,manager_id,created,expires) VALUES(?,?,?,?)", (mtok_hash(tok), m["id"], now, now + SESS_DAYS * 86400))
+        c.execute("UPDATE managers SET last_seen=? WHERE id=?", (now, m["id"]))
+    log("humano", f"gestor {m['name']} entrou")
+    return {"token": tok, "manager": manager_public(dict(m))}
+
+@app.post("/api/gestor/logout")
+async def gestor_logout(x_token: str = Header(default="")):
+    manager_from_token(x_token)
+    with conn() as c:
+        c.execute("DELETE FROM manager_sessions WHERE th=?", (mtok_hash(x_token),))
+    return {"ok": True}
+
+@app.get("/api/gestor/me")
+async def gestor_me(x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    await refresh_lines_state()
+    mine = set(mgr_line_ids(m["id"]))
+    lines = [l for l in line_summary() if l["id"] in mine]
+    now = time.time()
+    with conn() as c:
+        ags = [dict(r) for r in c.execute("SELECT * FROM agents WHERE manager_id=? ORDER BY name", (m["id"],))]
+    return {"manager": manager_public(m), "provider": PROVIDER, "lines": lines, "agents": [agent_public(a, now) for a in ags],
+            "queue": len(queue_rows(m["id"])), "blocked": qr_blocked(), "hours": hours_status()}
+
+class MgrLineIn(BaseModel):
+    label: str = ""
+
+@app.post("/api/gestor/lines")
+async def gestor_line_add(b: MgrLineIn, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    if len(mgr_line_ids(m["id"])) >= m["max_lines"]:
+        raise HTTPException(400, f"Seu acesso permite {m['max_lines']} número(s) de WhatsApp. Peça ao administrador para ampliar.")
+    r = await lines_add({"label": b.label})
+    with conn() as c:
+        c.execute("UPDATE lines SET manager_id=? WHERE id=?", (m["id"], r["id"]))
+    log("conexao", f"gestor {m['name']} adicionou o número {r['id']}")
+    return r
+
+@app.put("/api/gestor/lines/{line_id}")
+async def gestor_line_put(line_id: str, b: MgrLineIn, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_line(m, line_id)
+    return await lines_put(line_id, {"label": b.label})
+
+@app.delete("/api/gestor/lines/{line_id}")
+async def gestor_line_del(line_id: str, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_line(m, line_id)
+    return await lines_delete(line_id)
+
+@app.get("/api/gestor/connection")
+async def gestor_connection(line: str = "", x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_line(m, line)
+    return await connection(line)
+
+@app.post("/api/gestor/pair")
+async def gestor_pair(b: PairIn, line: str = "", x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_line(m, line)
+    return await connection_pair(b, line)
+
+@app.post("/api/gestor/line-logout")
+async def gestor_line_logout(line: str = "", x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_line(m, line)
+    return await connection_logout(line)
+
+@app.post("/api/gestor/agents")
+async def gestor_agent_add(b: AgentIn, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    with conn() as c:
+        n = c.execute("SELECT COUNT(*) n FROM agents WHERE manager_id=?", (m["id"],)).fetchone()["n"]
+    if n >= m["max_agents"]:
+        raise HTTPException(400, f"Seu acesso permite {m['max_agents']} atendente(s). Peça ao administrador para ampliar.")
+    return _agent_create(b, m["id"])
+
+@app.put("/api/gestor/agents/{aid}")
+async def gestor_agent_put(aid: int, b: AgentIn, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_agent(m, aid)
+    return await agents_edit(aid, b)
+
+@app.delete("/api/gestor/agents/{aid}")
+async def gestor_agent_del(aid: int, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_agent(m, aid)
+    return await agents_del(aid)
+
+@app.get("/api/gestor/metrics")
+async def gestor_metrics(days: int = 30, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    return {"days": days, "agents": agent_metrics(days, m["id"])}
+
+@app.get("/api/gestor/leads")
+async def gestor_leads(x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    ids = mgr_line_ids(m["id"])
+    if not ids:
+        return {"leads": []}
+    ph = ",".join("?" * len(ids))
+    with conn() as c:
+        rows = c.execute(f"""SELECT l.phone,l.line,l.name,l.company,l.stage,l.human,l.agent_id,l.outcome,l.origin,l.handoff_reason,l.bant,l.meeting,a.name AS agent_name,
+            (SELECT text FROM messages m WHERE m.phone=l.phone ORDER BY id DESC LIMIT 1) AS last_text,
+            (SELECT ts FROM messages m WHERE m.phone=l.phone ORDER BY id DESC LIMIT 1) AS last_ts
+            FROM leads l LEFT JOIN agents a ON a.id=l.agent_id
+            WHERE l.test=0 AND l.line IN ({ph}) ORDER BY COALESCE(last_ts,l.created) DESC LIMIT 300""", ids).fetchall()
+    return {"leads": [dict(r) for r in rows]}
+
+@app.get("/api/gestor/messages/{phone}")
+async def gestor_messages(phone: str, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_lead(m, phone)
+    with conn() as c:
+        rows = c.execute("SELECT role,text,ts,agent,kind FROM messages WHERE phone=? ORDER BY id", (phone,)).fetchall()
+    return [dict(r) for r in rows]
+
+@app.post("/api/gestor/handoff/{phone}")
+async def gestor_handoff(phone: str, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_lead(m, phone)
+    handoff_begin(phone, f"enviada à equipe pelo gestor {m['name']}", "gestor")
+    await handoff_sweep()
+    return {"ok": True}
+
+@app.post("/api/gestor/takeover/{phone}")
+async def gestor_takeover(phone: str, b: TakeIn, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_lead(m, phone)
+    return await takeover(phone, b)
+
+@app.post("/api/gestor/send/{phone}")
+async def gestor_send(phone: str, b: TextIn, x_token: str = Header(default="")):
+    m = manager_from_token(x_token)
+    mgr_own_lead(m, phone)
+    t = (b.text or "").strip()
+    if not t:
+        raise HTTPException(400, "Mensagem vazia")
+    res = await reply_to(phone, t[:4000], role="humano", humanize=False, agent=m["name"])
+    if res == "janela24h":
+        raise HTTPException(409, WINDOW_MSG)
+    set_lead(phone, handled_at=time.time())
     return {"ok": True}

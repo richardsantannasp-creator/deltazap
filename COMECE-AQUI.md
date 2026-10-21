@@ -69,6 +69,8 @@ Clique em **Verificar instalação** (topo do painel): ele confere chave do Clau
 ## 5c. Ter pessoas atendendo junto com a IA (opcional)
 Na aba **Avisos**, em **Equipe de atendimento**, cadastre cada atendente (nome, usuário e senha). Eles entram em `http://localhost:8000/atendente` (ou `https://SEU-DOMINIO/atendente` em produção), ficam *disponíveis* e recebem as conversas que a IA transfere, ou que você envia com **Enviar à equipe**. Se ninguém estiver disponível, a conversa espera na fila. Detalhes no README, seção "Transferência para atendente humano".
 
+Se quiser que alguém tenha **o próprio número de WhatsApp e a própria equipe**, crie um **gestor** em **Avisos > Gestores de equipe**. Ele entra em `/gestor` e só vê o que é dele (veja `GESTOR.md`).
+
 ## 5d. Materiais, horário da equipe e Google Agenda (opcional)
 
 - **Materiais** (catálogo em PDF, vídeo, imagem): Agentes > seu nicho > "Materiais para enviar". O agente envia sozinho quando o lead pede.

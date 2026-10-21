@@ -35,6 +35,7 @@ const OB=[{id:3,phone:"5511977770003",name:"Paula",status:"queued",error:"",nich
 const PC={min_delay:45,max_delay:150,batch_size:8,batch_pause_min:8,batch_pause_max:20,daily_limit:80,warmup:true,start_hour:9,end_hour:18,weekdays_only:true,reply_delay_min:4,reply_delay_max:14,max_optout_pct:8,paused:false,autopause:"",allowed_today:30,tz:"America/Sao_Paulo",warmup_start:20,warmup_step:10};
 const nn=id=>(N.find(n=>n.id==id)||{}).name;
 let QKS=[{id:1,title:"Saudação",body:"Olá {nome}, aqui é a equipe! Como posso ajudar?"},{id:2,title:"Pedir foto",body:"Pode me mandar uma foto do documento, por favor?"}],NTS=[{id:1,author:"Ana Lima",text:"Prefere contato à tarde.",ts:Date.now()/1e3-3600}];
+const MGS=[{id:1,login:'carla@matriz.com',name:'Carla Gestora',active:true,max_lines:1,max_agents:5,lines:1,agents:2,online:true}];
 const AGS=[{id:1,login:'ana@sualoja.com',name:'Ana Lima',active:true,available:true,online:true,max_chats:5,load:2},{id:2,login:'bruno',name:'Bruno Reis',active:true,available:false,online:false,max_chats:5,load:0}];
 const J=(o,s)=>new Response(JSON.stringify(o),{status:s||200});
 const first=n=>(n||"").trim().split(" ")[0]||"tudo bem";
@@ -126,6 +127,9 @@ window.fetch=async(url,o)=>{o=o||{};const p=new URL(url,location.href).pathname,
  if(/^\/api\/materials\//.test(p))return J({ok:true});
  if(p=="/api/gcal")return me=="PUT"?J({ok:true,ready:true}):J({config:{enabled:true,calendar_id:"vendas@group.calendar.google.com",duration_min:30,notice_min:120,horizon_days:14,step_min:30,days:[["09:00","18:00"],["09:00","18:00"],["09:00","18:00"],["09:00","18:00"],["09:00","18:00"],null,null],title:"Reunião com {nome}"},sa_email:"sdr-agenda@projeto.iam.gserviceaccount.com",has_sa:true,ready:true,day_names:["segunda","terça","quarta","quinta","sexta","sábado","domingo"]});
  if(p=="/api/gcal/test")return J({ok:true,calendar:"Comercial",slots:["21/10 09:00","21/10 09:30","21/10 10:00"]});
+ if(p=="/api/managers"&&me=="GET")return J({managers:MGS.map(m=>({...m})),url:"/gestor"});
+ if(p=="/api/managers"&&me=="POST"){if(!(b.name||"").trim()||!(b.login||"").trim())return J({detail:"Informe o nome e o usuário (e-mail ou apelido) do gestor"},400);MGS.push({id:MGS.length+1,login:b.login,name:b.name,active:true,max_lines:b.max_lines||1,max_agents:b.max_agents||10,lines:0,agents:0,online:false});return J({ok:true,login:b.login,password:b.password||"Gx7-demo-pass"})}
+ if(/^\/api\/managers\/\d+$/.test(p)){const x=MGS.find(a=>a.id==p.split("/").pop());if(me=="DELETE")MGS.splice(MGS.indexOf(x),1);else if(x){x.active=b.active;x.name=b.name||x.name;x.max_lines=b.max_lines||x.max_lines;x.max_agents=b.max_agents||x.max_agents}return J({ok:true})}
  if(p=="/api/agents"&&me=="GET")return J({agents:AGS.map(x=>({...x,present:x.online})),queue:1,config:{auto_assign:true,wait_min:15,fallback:"manter",reassign_min:10}});
  if(p=="/api/agents"&&me=="POST"){if(!(b.name||"").trim()||!(b.login||"").trim())return J({detail:"Informe o nome e o usuário (e-mail ou apelido) do atendente"},400);AGS.push({id:AGS.length+1,login:b.login,name:b.name,active:true,available:true,online:false,max_chats:b.max_chats||5,load:0});return J({ok:true,login:b.login,password:b.password||"k7Qm2xPd"})}
  if(/^\/api\/agents\/\d+$/.test(p)){const x=AGS.find(a=>a.id==p.split("/").pop());if(me=="DELETE")AGS.splice(AGS.indexOf(x),1);else if(x){x.active=b.active;x.name=b.name||x.name}return J({ok:true})}

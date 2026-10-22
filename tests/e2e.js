@@ -169,7 +169,7 @@ const step = async (name, fn) => {
   await step('aba Envio: fila e limite de aquecimento', async () => {
     await page.click('#t3')
     await until(async () => (await page.innerText('#bq')).split('queued').length - 1 === 4, 6000, '4 na fila')
-    const k = (await page.innerText('#kpis')).replace(/\n/g, ' '); expect(k.includes('0 / 20') && /Na fila\s*4/.test(k), 'KPIs: ' + k)
+    const k = (await page.innerText('#kpis')).replace(/\n/g, ' '); expect(k.includes('0 / 10') && /Na fila\s*4/.test(k), 'KPIs: ' + k)
     expect((await page.textContent('#mrisk')).includes('sem dados'), 'risco sem dados')
   })
   await step('a fila envia no ritmo: 1 por vez, com "digitando", pulando número sem WhatsApp', async () => {
@@ -186,7 +186,7 @@ const step = async (name, fn) => {
   await step('contatos disparados aparecem em Conversas como Ativo; métricas atualizam', async () => {
     await page.click('#t1'); await until(async () => { const t = await page.innerText('#leads'); return t.includes('João') && t.includes('Maria') && t.includes('Sair Depois') }, 6000, 'leads disparados')
     expect((await page.innerText('#leads')).includes('Ativo'), 'tag Ativo')
-    await page.click('#t3'); await until(async () => (await page.innerText('#kpis')).includes('3 / 20'), 7000, 'enviados hoje 3')
+    await page.click('#t3'); await until(async () => (await page.innerText('#kpis')).includes('3 / 10'), 7000, 'enviados hoje 3')
     expect((await page.innerText('#bn')).includes('Planos de saúde'), 'tabela por nicho')
     expect((await page.$$('#bars i')).length === 24, 'gráfico por hora')
   })

@@ -57,6 +57,9 @@ O agente consulta horários livres e cria o evento de verdade em uma agenda do G
 ## Gestor de equipe (acesso próprio, número próprio, equipe própria)
 O administrador cria gestores em **Avisos > Gestores de equipe** (limites de números e de atendentes por gestor). O gestor entra em `/gestor`, conecta o WhatsApp dele, cria os atendentes dele e atende as conversas dos números dele, sem ver nada de outros. Transferências em números do gestor só vão para a equipe dele, e os números dos gestores nunca entram nos disparos do administrador. Detalhes em `GESTOR.md`.
 
+## Aquecimento de números (plano de 14 dias)
+Cada número novo segue um plano de envios ativos por dia, contado a partir do primeiro envio dele: 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110 e 120 (depois vale o limite diário). Você edita o plano em **Envio e conexão > Ritmo**. Há um **freio automático**: se nos últimos 3 dias (com 15 envios ou mais) menos de 5% responderem, ou 4% ou mais pedirem para sair, o limite daquele número cai à metade até a taxa melhorar, e o painel mostra "segurando". O sistema **não** faz números conversarem entre si: isso é tráfego artificial que o WhatsApp penaliza. O que aquece de verdade é uso normal do chip, contatos que respondem e volume crescente.
+
 ## Etiquetas, quadro (kanban) e filtros
 Etiquetas coloridas por lead (já vêm Quente, Morno, Frio, Cliente e Retornar; você cria, renomeia e apaga) e uma aba **Quadro** com uma coluna por etapa do funil: arraste o cartão para mudar de etapa. Mover para **Com a equipe** abre a transferência; sair dela devolve a conversa à IA; **Descartado** pede confirmação e coloca o contato na lista de supressão. Conversas têm busca por nome, telefone e empresa e filtros por etapa e etiqueta, no painel, no atendente e no gestor.
 

@@ -151,7 +151,9 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
  <div><label>Pausa maior a cada (envios)</label><input type="text" id="p_batch_size"></div><div><label>Pausa do lote (min, de/até)</label><div class="row"><input type="text" id="p_batch_pause_min"><input type="text" id="p_batch_pause_max"></div></div>
  <div><label>Limite diário de contatos novos</label><input type="text" id="p_daily_limit"></div><div><label>Janela de envio (hora de/até)</label><div class="row"><input type="text" id="p_start_hour"><input type="text" id="p_end_hour"></div></div>
  <div><label>Atraso antes de responder lead (s, de/até)</label><div class="row"><input type="text" id="p_reply_delay_min"><input type="text" id="p_reply_delay_max"></div></div><div><label>Pausar se saídas/descartes passarem de (%)</label><input type="text" id="p_max_optout_pct"></div></div>
- <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="p_warmup"> Aquecimento gradual: começa com <b id="wu">20</b> por dia e sobe até o limite</label>
+ <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="p_warmup"> Aquecimento gradual de 14 dias por número: começa com <b id="wu">10</b> por dia e sobe até o limite</label>
+ <div id="wp_box" class="note" style="margin:4px 0 8px"><div>Plano (envios ativos por dia, do dia 1 ao 14), separados por vírgula:</div><input type="text" id="wp_in" style="width:100%"><div class="row" style="align-items:center"><button class="g" id="wp_save">Salvar plano</button><button class="g" id="wp_def">Voltar ao padrão</button><span id="wp_m"></span></div>
+  <div>Cada número começa no dia do primeiro envio dele. Se nos últimos 3 dias (com 15+ envios) menos de 5% responderem ou 4%+ pedirem para sair, o limite do número cai à metade até melhorar. Antes de automatizar, use o chip normalmente por alguns dias, com foto e nome.</div></div>
  <label style="display:flex;gap:8px;align-items:center;margin:0"><input type="checkbox" id="p_weekdays_only"> Só dias úteis</label>
  <div class="row"><button id="psave">Salvar ritmo</button><button class="g" id="ppause">Pausar envios</button><button class="g" id="pclear">Limpar fila</button></div>
  <div class="note" id="pinfo"></div>
@@ -400,13 +402,13 @@ const DOT={open:"🟢",qr:"📷",connecting:"⏳",closed:"🔴",gateway_offline:
 async function loadLines(){try{const d=await api("/api/lines");linesData=d;const q=d.provider=="qr";
  if(!d.lines.some(l=>l.id==curLine))curLine="main";
  $("linebar").classList.toggle("hide",!(q&&d.lines.length>1));$("lineadd").classList.toggle("hide",!(q&&d.lines.length<d.max));
- const sig=JSON.stringify([curLine,d.lines.map(l=>[l.id,l.label,l.active,l.state,l.sent_today,l.allowed_today,l.queued])]);
+ const sig=JSON.stringify([curLine,d.lines.map(l=>[l.id,l.label,l.active,l.state,l.sent_today,l.allowed_today,l.queued,l.warm_day,l.warm_hold])]);
  if(sig!==_lsig){_lsig=sig;
   $("linebar").innerHTML=d.lines.map(l=>`<button class="tab${l.id==curLine?" on":""}" data-l="${esc(l.id)}">${DOT[l.state]||"⚪"} ${esc(l.label)}${l.active?"":" (pausado)"} · ${l.sent_today}/${l.allowed_today}</button>`).join("");
   $("linebar").querySelectorAll("button").forEach(b=>b.onclick=()=>{curLine=b.dataset.l;_lsig="";window._qrh="";loadLines();loadConn()});
   const l=d.lines.find(x=>x.id==curLine);
   $("lineinfo").classList.toggle("hide",!(q&&l&&d.lines.length>1));
-  if(l)$("lineinfo").innerHTML=`${l.me?av("me",l.label,l.id,"sm")+" ":""}<b>${esc(l.label)}</b>${l.me?" (+"+esc(l.me)+")":""}: hoje ${l.sent_today} de ${l.allowed_today} · na fila ${l.queued} · ${l.active?"<button class='g' id='ln_tog'>Pausar este número</button>":"<button class='g' id='ln_tog'>Reativar este número</button>"}${l.id=="main"?"":" <button class='d' id='ln_rm'>Remover</button>"}${d.unassigned?`<br>${d.unassigned} contato(s) aguardam e serão divididos entre os números conectados.`:""}`;
+  if(l)$("lineinfo").innerHTML=`${l.me?av("me",l.label,l.id,"sm")+" ":""}<b>${esc(l.label)}</b>${l.me?" (+"+esc(l.me)+")":""}: hoje ${l.sent_today} de ${l.allowed_today}${l.warm_day?` (aquecimento: dia ${l.warm_day} de 14${l.warm_hold?" · <b>segurando: pouca resposta ou muitas saídas</b>":""})`:""} · na fila ${l.queued} · ${l.active?"<button class='g' id='ln_tog'>Pausar este número</button>":"<button class='g' id='ln_tog'>Reativar este número</button>"}${l.id=="main"?"":" <button class='d' id='ln_rm'>Remover</button>"}${d.unassigned?`<br>${d.unassigned} contato(s) aguardam e serão divididos entre os números conectados.`:""}`;
   if($("ln_tog"))$("ln_tog").onclick=async()=>{await api("/api/lines/"+encodeURIComponent(curLine),{active:!l.active},"PUT");_lsig="";loadLines()};
   if($("ln_rm"))$("ln_rm").onclick=async()=>{if(confirm("Remover este número? A sessão do WhatsApp dele é encerrada e os contatos na fila dele serão divididos entre os outros números.")){await api("/api/lines/"+encodeURIComponent(curLine),null,"DELETE");curLine="main";_lsig="";window._qrh="";loadLines();loadConn()}}}
  const sel=$("dline"),keep=sel.value;if(q&&d.lines.length>1){sel.innerHTML='<option value="auto">Automático (divide entre os números conectados)</option>'+d.lines.filter(l=>l.active).map(l=>`<option value="${esc(l.id)}">${esc(l.label)} ${DOT[l.state]||""}</option>`).join("");sel.value=[...sel.options].some(o=>o.value==keep)?keep:"auto"}
@@ -430,12 +432,15 @@ async function loadEnvio(){loadConn();const m=await api("/api/metrics"),c=await 
  const mx=Math.max(1,...m.hourly);$("bars").innerHTML=m.hourly.map((v,h)=>`<i title="${h}h: ${v}" style="height:${Math.max(3,v/mx*100)}%"></i>`).join("");
  $("bn").innerHTML=m.by_niche.length?m.by_niche.map(n=>`<tr><td>${esc(n.name)}</td><td>${n.sent}</td><td>${n.replied}${n.sent?" ("+Math.round(n.replied*100/n.sent)+"%)":""}</td></tr>`).join(""):'<tr><td colspan="3" class="note">Sem envios nos últimos 7 dias.</td></tr>';
  pcfg=c;if(!editing){F.forEach(k=>$("p_"+k).value=c[k]);$("p_warmup").checked=c.warmup;$("p_weekdays_only").checked=c.weekdays_only}
- $("wu").textContent=c.warmup_start;$("ppause").textContent=c.paused?"Retomar envios":"Pausar envios";
+ $("wu").textContent=c.warmup_start;if(!window._wpEdit)$("wp_in").value=(c.warmup_plan||[]).join(", ");$("ppause").textContent=c.paused?"Retomar envios":"Pausar envios";
  $("apause").innerHTML=c.autopause?`<div class="warn"><b>Envios pausados automaticamente:</b> ${esc(c.autopause)}. Revise antes de retomar.</div>`:c.paused?'<div class="warn">Envios pausados pelo operador.</div>':"";
  $("pinfo").textContent=`Fuso: ${c.tz}. Limite de hoje: ${c.allowed_today}. Pisos de segurança: intervalo mínimo 20 s, máximo 300 contatos novos por dia.`;
  const q=await api("/api/outbox");$("bq").innerHTML=q.length?q.map(o=>`<tr><td>${esc(o.name||o.phone)}</td><td>${esc(o.niche||"")}</td><td>${o.status}${o.error?" · "+esc(o.error):""}${multi()&&o.line?" · "+esc(lineName(o.line)):""}</td></tr>`).join(""):'<tr><td colspan="3" class="note">Fila vazia.</td></tr>'}
 $("pg").onclick=async()=>{$("pcode").textContent="…";try{const r=await api("/api/connection/pair?line="+encodeURIComponent(curLine),{phone:$("pn").value});$("pcode").style.fontSize="28px";$("pcode").textContent=r.code}catch(e){$("pcode").style.fontSize="13px";$("pcode").textContent=(e&&e.message)||"Não foi possível gerar o código"}};
 document.querySelectorAll("#v3 input").forEach(i=>{if(i.id!="pn")i.oninput=()=>editing=true});
+$("wp_in").oninput=()=>{window._wpEdit=true};
+$("wp_save").onclick=async()=>{try{await api("/api/warmup",{plan:$("wp_in").value.split(",").map(x=>x.trim()).filter(Boolean)},"PUT");window._wpEdit=false;flash("wp_m","Plano salvo",3000);loadEnvio()}catch(e){flash("wp_m",e.message,6000)}};
+$("wp_def").onclick=async()=>{try{await api("/api/warmup",{plan:"default"},"PUT");window._wpEdit=false;loadEnvio()}catch(e){}};
 $("psave").onclick=async()=>{const b={};F.forEach(k=>b[k]=$("p_"+k).value);b.warmup=$("p_warmup").checked;b.weekdays_only=$("p_weekdays_only").checked;await api("/api/pacing",b,"PUT");editing=false;loadEnvio()};
 $("ppause").onclick=async()=>{await api("/api/outbox/pause",{paused:!pcfg.paused&&!pcfg.autopause});loadEnvio()};
 $("pclear").onclick=async()=>{if(confirm("Remover todos os contatos que ainda estão na fila?")){await api("/api/outbox/clear",{});loadEnvio()}};

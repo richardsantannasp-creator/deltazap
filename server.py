@@ -42,8 +42,8 @@ try:
     TZ = ZoneInfo(os.getenv("TZ_NAME", "America/Sao_Paulo"))
 except Exception:                       # Windows sem o pacote tzdata: usa o horário de Brasília fixo (UTC-3)
     TZ = timezone(timedelta(hours=-3))
-WARMUP_START = int(os.getenv("WARMUP_START", "20"))            # envios ativos permitidos no 1º dia
-WARMUP_STEP = int(os.getenv("WARMUP_STEP", "10"))              # acréscimo por dia até o limite diário
+WARMUP_PLAN = [10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]    # plano de 14 dias: envios ativos permitidos por dia, por número (editável no painel)
+WARMUP_START = WARMUP_PLAN[0]
 
 class _LazyClaude:
     """Cria o cliente só no primeiro uso, para o servidor subir (e o painel abrir) mesmo sem a chave."""
@@ -1380,13 +1380,42 @@ def line_first_day(line="main"):
         r = c.execute("SELECT first_send_day FROM lines WHERE id=?", (line,)).fetchone()
     return (r["first_send_day"] if r else "") or (get_setting("first_send_day") if line == "main" else "")
 
+def warmup_plan():
+    try:
+        pl = json.loads(get_setting("warmup_plan") or "null")
+        if isinstance(pl, list) and len(pl) == 14 and all(isinstance(x, int) and 1 <= x <= 300 for x in pl):
+            return pl
+    except ValueError:
+        pass
+    return list(WARMUP_PLAN)
+
+def line_warm_day(line="main"):
+    """Dia do aquecimento do número (0 = primeiro dia de envio)."""
+    first = line_first_day(line)
+    return max(0, (now_local().date() - date.fromisoformat(first)).days) if first else 0
+
+def line_health(line="main", now=None):
+    """Saúde dos envios recentes do número (3 dias). Pouca resposta ou muitas saídas = segurar o aquecimento."""
+    since = (now or time.time()) - 3 * 86400
+    with conn() as c:
+        sent = c.execute("SELECT COUNT(*) n FROM outbox WHERE status='sent' AND sent_at>=? AND COALESCE(NULLIF(line,''),'main')=?", (since, line)).fetchone()["n"]
+        rep_ = c.execute("SELECT COUNT(*) n FROM outbox o WHERE o.status='sent' AND o.sent_at>=? AND COALESCE(NULLIF(o.line,''),'main')=? AND EXISTS("
+                         "SELECT 1 FROM messages m WHERE m.phone=o.phone AND m.role='lead' AND m.ts>o.sent_at)", (since, line)).fetchone()["n"]
+        opt = c.execute("SELECT COUNT(*) n FROM outbox o WHERE o.status='sent' AND o.sent_at>=? AND COALESCE(NULLIF(o.line,''),'main')=? AND EXISTS("
+                        "SELECT 1 FROM leads l WHERE l.phone=o.phone AND l.stage='descartado')", (since, line)).fetchone()["n"]
+    hold = sent >= 15 and (rep_ * 100 / sent < 5 or opt * 100 / sent >= 4)
+    return {"sent": sent, "reply_pct": round(rep_ * 100 / sent, 1) if sent else 0, "optout_pct": round(opt * 100 / sent, 1) if sent else 0, "hold": hold}
+
 def allowed_today(cfg, line="main"):
-    """Limite de hoje de UM número. Cada linha tem o próprio aquecimento (começa no dia do primeiro envio dela)."""
+    """Limite de hoje de UM número. Cada número segue o plano de 14 dias a partir do primeiro envio dele; com resposta baixa ou muitas saídas, o limite cai à metade."""
     lim = cfg["daily_limit"]
     if cfg["warmup"]:
-        first = line_first_day(line)
-        days = (now_local().date() - date.fromisoformat(first)).days if first else 0
-        lim = min(lim, WARMUP_START + WARMUP_STEP * max(0, days))
+        plan = warmup_plan(); day = line_warm_day(line)
+        if day < len(plan):
+            step = plan[day]
+            if line_health(line)["hold"]:
+                step = max(plan[0], step // 2)
+            lim = min(lim, step)
     return lim
 
 def rates(since):
@@ -1536,7 +1565,7 @@ class PauseIn(BaseModel):
 @app.get("/api/pacing", dependencies=[Depends(auth)])
 async def pacing_get():
     return {**get_pacing(), "paused": get_setting("paused") == "1", "autopause": get_setting("autopause", ""),
-            "allowed_today": allowed_today(get_pacing()), "per_line": True, "tz": str(TZ), "warmup_start": WARMUP_START, "warmup_step": WARMUP_STEP}
+            "allowed_today": allowed_today(get_pacing()), "per_line": True, "tz": str(TZ), "warmup_start": warmup_plan()[0], "warmup_plan": warmup_plan()}
 
 @app.put("/api/pacing", dependencies=[Depends(auth)])
 async def pacing_put(b: dict):
@@ -3133,7 +3162,9 @@ def line_summary(cfg=None):
         st = LINE_STATE.get(ln["id"]) or {}
         out.append({"id": ln["id"], "label": ln["label"] or ln["id"], "active": bool(ln["active"]), "state": st.get("state") if PROVIDER == "qr" else "official",
                     "me": st.get("me"), "sent_today": sent.get(ln["id"], 0), "allowed_today": allowed_today(cfg, ln["id"]),
-                    "queued": q.get(ln["id"], 0), "next_in": max(0, round(LINE_NEXT.get(ln["id"], 0) - now))})
+                    "queued": q.get(ln["id"], 0), "next_in": max(0, round(LINE_NEXT.get(ln["id"], 0) - now)),
+                    "warm_day": (line_warm_day(ln["id"]) + 1) if cfg["warmup"] and line_warm_day(ln["id"]) < 14 else None,
+                    "warm_hold": bool(cfg["warmup"] and line_warm_day(ln["id"]) < 14 and line_health(ln["id"])["hold"])})
     return out
 
 @app.get("/api/lines", dependencies=[Depends(auth)])
@@ -6334,6 +6365,7 @@ AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale;
     ("POST", r"^/api/agents$", "Criou atendente"), ("PUT", r"^/api/agents/(\d+)$", "Alterou atendente"), ("DELETE", r"^/api/agents/(\d+)$", "Excluiu atendente"),
     ("POST", r"^/api/managers$", "Criou gestor"), ("PUT", r"^/api/managers/(\d+)$", "Alterou gestor"), ("DELETE", r"^/api/managers/(\d+)$", "Excluiu gestor"),
     ("POST", r"^/api/tags$", "Criou etiqueta"), ("PUT", r"^/api/tags/(\d+)$", "Alterou etiqueta"), ("DELETE", r"^/api/tags/(\d+)$", "Excluiu etiqueta"),
+    ("PUT", r"^/api/warmup$", "Alterou o plano de aquecimento dos números"),
     ("POST", r"^/api/flows$", "Criou roteiro"), ("PUT", r"^/api/flows/(\d+)$", "Alterou roteiro"), ("DELETE", r"^/api/flows/(\d+)$", "Excluiu roteiro"),
     ("POST", r"^/api/agent/notes/(\d+)$", "Anotou no lead"), ("POST", r"^/api/agent/send/(\d+)$", "Respondeu o lead"), ("POST", r"^/api/agent/claim/(\d+)$", "Assumiu a conversa"),
     ("POST", r"^/api/agent/release/(\d+)$", "Devolveu a conversa à IA"), ("POST", r"^/api/agent/transfer/(\d+)$", "Transferiu a conversa"), ("POST", r"^/api/agent/outcome/(\d+)$", "Definiu resultado do lead"),
@@ -7046,3 +7078,28 @@ async def gestor_calendar_test(x_token: str = Header(default="")):
     except GcalError as e:
         return {"ok": False, "error": str(e)}
     return {"ok": True, "calendar": cal.get("summary") or cid, "slots": [d.strftime("%d/%m %H:%M") for d in slots]}
+
+
+@app.get("/api/warmup", dependencies=[Depends(auth)])
+async def warmup_get():
+    return {"plan": warmup_plan(), "default": WARMUP_PLAN, "lines": [{"id": l["id"], "label": l["label"], "day": l["warm_day"], "hold": l["warm_hold"], "allowed_today": l["allowed_today"],
+            "health": line_health(l["id"])} for l in line_summary()]}
+
+@app.put("/api/warmup", dependencies=[Depends(auth)])
+async def warmup_put(b: dict):
+    pl = b.get("plan")
+    if pl is None or pl == "default":
+        set_setting("warmup_plan", None)
+        return {"ok": True, "plan": list(WARMUP_PLAN)}
+    try:
+        pl = [int(x) for x in pl]
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Informe 14 números inteiros (um por dia)")
+    if len(pl) != 14 or any(x < 1 or x > 300 for x in pl):
+        raise HTTPException(400, "Informe 14 números entre 1 e 300 (um por dia)")
+    if any(b2 < a2 for a2, b2 in zip(pl, pl[1:])):
+        raise HTTPException(400, "O plano não pode diminuir de um dia para o outro")
+    if pl[0] > 30 or pl[6] > 100:
+        raise HTTPException(400, "Plano agressivo demais para um número novo: no máximo 30 no 1º dia e 100 no 7º")
+    set_setting("warmup_plan", json.dumps(pl))
+    return {"ok": True, "plan": pl}

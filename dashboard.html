@@ -63,7 +63,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 @media(max-width:900px){main{height:auto}#v1,#v2,#v4,#v5,#v6,#v7,#v8{grid-template-columns:1fr}.col{min-height:420px}.fr{grid-template-columns:110px 1fr 90px}}
 </style></head><body>
 <header><h1>SDR WhatsApp</h1>
-<button class="tab on" id="t1">Conversas</button><button class="tab" id="t2">Agentes (nichos)</button><button class="tab" id="t3">Envio e conexão</button><button class="tab" id="t4">Funil</button><button class="tab" id="t5">Avisos</button><button class="tab" id="t6">Retomada</button><button class="tab" id="t7">Custos</button><button class="tab" id="t9">Quadro</button><button class="tab" id="t8">Integrações</button><span class="sp"></span>
+<button class="tab on" id="t1">Conversas</button><button class="tab" id="t2">Agentes (nichos)</button><button class="tab" id="t3">Envio e conexão</button><button class="tab" id="t4">Funil</button><button class="tab" id="t5">Avisos</button><button class="tab" id="t6">Retomada</button><button class="tab" id="t7">Custos</button><button class="tab" id="t9">Quadro</button><button class="tab" id="t10">Prospecção</button><button class="tab" id="t8">Integrações</button><span class="sp"></span>
 <span class="pill wait hide" id="pw"></span><span class="pill" id="pc" style="cursor:pointer">Conexão: …</span><span class="pill" id="pm">Modelo: …</span><span class="pill" id="pdg" style="cursor:pointer" title="Confere chave do Claude, WhatsApp, áudio, vídeo, avisos, backup e mais">Verificar instalação</span></header>
 <div id="opn" class="hide" role="status" style="padding:8px 16px;font-size:13px;border-bottom:1px solid var(--bd)"></div>
 
@@ -278,6 +278,23 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
  <div class="hide" id="kb_mg" style="padding:10px 12px;border-bottom:1px solid var(--bd)"><div class="note">Arraste os cartões entre as colunas para mudar a etapa. Mover para <b>Com a equipe</b> envia à fila de atendimento; mover para <b>Descartado</b> coloca o contato na lista de supressão (nunca mais recebe mensagem); tirar de <b>Com a equipe</b> devolve a conversa à IA.</div><div id="tg_list"></div>
   <div class="row" style="align-items:flex-end"><div><label>Nova etiqueta</label><input type="text" id="tg_name" maxlength="30"></div><div style="flex:0 0 130px"><label>Cor</label><select id="tg_col"></select></div><button class="g" id="tg_add">Adicionar</button></div><div class="note" id="tg_msg"></div></div>
  <div class="kb" id="kb"></div></section></main>
+<main id="v10" class="hide">
+<section class="col" style="grid-column:1/-1;min-width:0"><h2>Prospecção por Google <span class="note" id="pr_n"></span></h2><div class="scroll"><div class="form">
+ <div class="note" id="pr_warn"></div>
+ <div class="row"><div style="flex:2"><label>Nicho(s) — separe por ponto e vírgula</label><input type="text" id="pr_terms" placeholder="clínica odontológica; academia"></div><div><label>Cidade</label><input type="text" id="pr_city" placeholder="Guarulhos SP"></div></div>
+ <div class="row"><div><label>Modo</label><select id="pr_mode"><option value="rapido">Rápido (até 60 por nicho)</option><option value="grade">Cobertura total (divide a cidade)</option></select></div><div><label>Limite de chamadas à API</label><input type="text" inputmode="numeric" id="pr_calls" value="60"></div><label style="display:flex;gap:8px;align-items:center;margin-top:18px"><input type="checkbox" id="pr_sites" checked> Procurar o WhatsApp no site da empresa</label></div>
+ <div class="row"><button id="pr_go">Buscar empresas</button><button class="g hide" id="pr_cancel">Cancelar</button></div>
+ <div class="note" id="pr_msg"></div><div class="hide" id="pr_barw" style="background:var(--bd);border-radius:4px"><i id="pr_bar" style="display:block;height:6px;background:var(--ac);width:0"></i></div>
+ <hr style="border:0;border-top:1px solid var(--bd);margin:12px 0">
+ <div class="row" style="align-items:flex-end"><div><label>Mostrar</label><select id="pr_f_s"><option value="">Todas as buscas</option></select></div><div><label>Status</label><select id="pr_f_st"><option value="">Todos</option></select></div><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="pr_f_wa" checked> Só com WhatsApp</label><button class="g" id="pr_sel">Marcar confirmados</button><button class="g" id="pr_exp">Exportar CSV</button></div>
+ <div id="pr_list" style="overflow:auto;max-height:46vh"></div>
+ <div class="note" id="pr_sum"></div>
+ <div class="row" style="align-items:flex-end"><div><label>Agente (nicho) que fará a abordagem</label><select id="pr_niche"></select></div><div><label>Número de envio</label><select id="pr_line"><option value="auto">Automático</option></select></div></div>
+ <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="pr_prob"> Incluir também "provável celular" (o número é de celular, mas a empresa não divulgou WhatsApp). Mais risco de número sem WhatsApp.</label>
+ <label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0"><input type="checkbox" id="pr_ack"> Confirmo que são contatos comerciais (B2B) publicados pelas próprias empresas, que a abordagem é breve e identifica quem somos, e que quem responder SAIR sai da lista para sempre. Sei que estes contatos não deram opt-in e que o risco de bloqueio do número é meu.</label>
+ <div class="row"><button id="pr_imp">Enfileirar selecionadas para o SDR</button></div><div class="note" id="pr_imsg"></div>
+ <div class="note">Os envios saem pela fila normal: respeitam o limite diário, o aquecimento do número, a janela de horário e a lista de supressão. Os dados das buscas ficam guardados por 30 dias (regra do Google); quem virou lead permanece.</div>
+</div></div></section></main>
 <main id="v8" class="hide">
 <section class="col"><h2>CRM e agenda <span class="note" id="is"></span></h2><div class="scroll"><div class="form">
  <div><label>Destino dos leads</label><select id="i_type"><option value="webhook">Webhook genérico (n8n, Make, Zapier, outro CRM)</option><option value="pipedrive">Pipedrive (conector pronto)</option><option value="hubspot">HubSpot (conector pronto)</option></select></div>
@@ -360,8 +377,32 @@ const nameOf=id=>(niches.find(n=>n.id==id)||{}).name||"";
 const pretty=k=>k.replace(/_/g," ").replace(/^./,c=>c.toUpperCase());
 
 // abas
-function tab(n){[1,2,3,4,5,6,7,8,9].forEach(i=>{$("v"+i).classList.toggle("hide",n!=i);$("t"+i).classList.toggle("on",n==i)});if(n==3)loadEnvio();if(n==4){loadFunil();loadOrders()}if(n==5)loadAvisos();if(n==6)loadRetomada();if(n==7)loadCustos();if(n==8){loadInteg();loadLgpd();loadPay()}if(n==9)loadBoard()}
-$("t1").onclick=()=>tab(1);$("t2").onclick=()=>tab(2);$("t3").onclick=()=>tab(3);[4,5,6,7,8,9].forEach(n=>$("t"+n).onclick=()=>tab(n));$("pw").onclick=()=>tab(5);$("pc").onclick=()=>tab(3);
+
+let PRJ=null,PRR=[],PRSEL=new Set();
+async function loadProsp(){try{const c=await api("/api/prospect/config");$("pr_warn").textContent=c.has_key||c.demo?(c.demo?"Modo demonstração: dados fictícios.":"Chave do Google conectada. Cada página de 20 empresas = 1 chamada paga."):"Falta a chave do Google Places no servidor (GOOGLE_PLACES_API_KEY no .env). Veja PROSPECCAO.md.";
+ if(!$("pr_f_st").options.length||$("pr_f_st").options.length<2)$("pr_f_st").innerHTML='<option value="">Todos</option>'+c.statuses.map(x=>`<option>${esc(x)}</option>`).join("");
+ const n=await api("/api/niches");$("pr_niche").innerHTML=n.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("");
+ try{const d=await api("/api/lines");$("pr_line").innerHTML='<option value="auto">Automático</option>'+(d.lines||[]).map(l=>`<option value="${esc(l.id)}">${esc(l.label)}</option>`).join("")}catch(e){}
+ await prList()}catch(e){$("pr_msg").textContent=e.message}}
+async function prList(){const s=$("pr_f_s").value;const d=await api(`/api/prospect/list?search=${s||0}&status=${encodeURIComponent($("pr_f_st").value)}&only_wa=${$("pr_f_wa").checked?1:0}`);PRR=d.rows;
+ const cur=$("pr_f_s").value;$("pr_f_s").innerHTML='<option value="">Todas as buscas</option>'+d.searches.map(x=>`<option value="${x.id}">${esc(x.terms)} · ${esc(x.city)} (${x.total})</option>`).join("");$("pr_f_s").value=cur;
+ $("pr_n").textContent=PRR.length+" empresa(s)";
+ $("pr_list").innerHTML=PRR.length?`<table style="width:100%;font-size:13px;border-collapse:collapse"><tr style="text-align:left"><th></th><th>Empresa</th><th>WhatsApp</th><th>Origem</th><th>Status</th><th>Nota</th></tr>${PRR.map(r=>{const ok=r.whatsapp&&!r.blocked&&!r.lead_stage;return `<tr data-id="${esc(r.place_id)}" style="border-top:1px solid var(--bd)"><td><input type="checkbox" class="prs" ${PRSEL.has(r.place_id)?"checked":""} ${ok?"":"disabled"}></td><td>${esc(r.name)}<br><small>${esc(r.address||"")}</small></td><td>${r.blocked?"🚫 bloqueado":r.whatsapp?esc(r.whatsapp):"—"}${r.lead_stage?"<br><small>já é lead ("+esc(r.lead_stage)+")</small>":""}</td><td><small>${esc(r.wa_origin||"")}</small></td><td><select class="prst">${["Novo","Na fila","Contatado","Respondeu","Sem interesse","Não contatar"].map(x=>`<option ${x==r.status?"selected":""}>${x}</option>`).join("")}</select></td><td><input type="text" class="prnt" value="${esc(r.notes||"")}" maxlength="200"></td></tr>`}).join("")}</table>`:'<div class="note">Nenhuma empresa ainda. Faça uma busca acima.</div>';
+ document.querySelectorAll("#pr_list .prs").forEach(i=>i.onchange=()=>{const id=i.closest("tr").dataset.id;i.checked?PRSEL.add(id):PRSEL.delete(id);prSum()});
+ document.querySelectorAll("#pr_list .prst").forEach(i=>i.onchange=async()=>{const r=i.closest("tr");try{await api("/api/prospect/"+encodeURIComponent(r.dataset.id),{status:i.value},"PUT");await prList()}catch(e){alert(e.message)}});
+ document.querySelectorAll("#pr_list .prnt").forEach(i=>i.onchange=()=>api("/api/prospect/"+encodeURIComponent(i.closest("tr").dataset.id),{notes:i.value},"PUT").catch(()=>{}));prSum()}
+function prSum(){const n=PRSEL.size;$("pr_sum").textContent=n?n+" selecionada(s) (máximo de 100 por envio)":"Marque as empresas que quer abordar."}
+$("pr_f_s").onchange=$("pr_f_st").onchange=$("pr_f_wa").onchange=()=>prList().catch(e=>$("pr_msg").textContent=e.message);
+$("pr_sel").onclick=()=>{PRR.filter(r=>r.whatsapp&&!r.blocked&&!r.lead_stage&&r.wa_origin==="Site da empresa"&&r.status==="Novo").slice(0,100).forEach(r=>PRSEL.add(r.place_id));prList()};
+$("pr_go").onclick=async()=>{$("pr_msg").textContent="";try{const r=await api("/api/prospect/search",{terms:$("pr_terms").value,city:$("pr_city").value,mode:$("pr_mode").value,max_calls:+$("pr_calls").value||60,sites:$("pr_sites").checked});PRJ=r.job_id;$("pr_go").disabled=true;$("pr_cancel").classList.remove("hide");$("pr_barw").classList.remove("hide");prPoll()}catch(e){$("pr_msg").textContent=e.message}};
+$("pr_cancel").onclick=()=>PRJ&&api(`/api/prospect/job/${PRJ}/cancel`,{});
+async function prPoll(){try{const j=await api("/api/prospect/job/"+PRJ);$("pr_bar").style.width=j.pct+"%";$("pr_msg").textContent=(j.state=="erro"?j.error:j.msg+" · "+j.calls+" chamada(s) · "+j.found+" encontrada(s)")+(j.warnings.length?" — "+j.warnings.join(" "):"");
+ if(j.state=="rodando"){setTimeout(prPoll,1200);return}
+ $("pr_go").disabled=false;$("pr_cancel").classList.add("hide");$("pr_barw").classList.add("hide");if(j.state!="erro"){$("pr_f_s").value=String(j.search_id||"");await prList()}}catch(e){$("pr_msg").textContent=e.message;$("pr_go").disabled=false}}
+$("pr_exp").onclick=async()=>{try{const r=await api("/api/prospect/export",{ids:PRR.map(x=>x.place_id)});const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([r.csv],{type:"text/csv"}));a.download="prospeccao.csv";a.click()}catch(e){alert(e.message)}};
+$("pr_imp").onclick=async()=>{$("pr_imsg").textContent="";try{const r=await api("/api/prospect/import",{ids:[...PRSEL],niche_id:+$("pr_niche").value,line:$("pr_line").value,ack:$("pr_ack").checked,include_probable:$("pr_prob").checked});const k=r.skipped||{};$("pr_imsg").textContent=`${r.queued} na fila${r.suppressed?`, ${r.suppressed} já pediram para sair`:""}${k.provavel?`, ${k.provavel} sem WhatsApp confirmado (ignoradas)`:""}${k.sem_whatsapp?`, ${k.sem_whatsapp} sem WhatsApp`:""}.`;PRSEL.clear();await prList()}catch(e){$("pr_imsg").textContent=e.message}};
+function tab(n){[1,2,3,4,5,6,7,8,9,10].forEach(i=>{$("v"+i).classList.toggle("hide",n!=i);$("t"+i).classList.toggle("on",n==i)});if(n==3)loadEnvio();if(n==4){loadFunil();loadOrders()}if(n==5)loadAvisos();if(n==6)loadRetomada();if(n==7)loadCustos();if(n==8){loadInteg();loadLgpd();loadPay()}if(n==10)loadProsp();if(n==9)loadBoard()}
+$("t1").onclick=()=>tab(1);$("t2").onclick=()=>tab(2);$("t3").onclick=()=>tab(3);[4,5,6,7,8,9,10].forEach(n=>$("t"+n).onclick=()=>tab(n));$("pw").onclick=()=>tab(5);$("pc").onclick=()=>tab(3);
 
 // nichos
 async function loadNiches(editor){niches=await api("/api/niches");if(ni==null||!niches.find(n=>n.id==ni))ni=(niches.find(n=>n.is_default)||niches[0]).id;

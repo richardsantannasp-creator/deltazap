@@ -57,6 +57,9 @@ O agente consulta horários livres e cria o evento de verdade em uma agenda do G
 ## Gestor de equipe (acesso próprio, número próprio, equipe própria)
 O administrador cria gestores em **Avisos > Gestores de equipe** (limites de números e de atendentes por gestor). O gestor entra em `/gestor`, conecta o WhatsApp dele, cria os atendentes dele e atende as conversas dos números dele, sem ver nada de outros. Transferências em números do gestor só vão para a equipe dele, e os números dos gestores nunca entram nos disparos do administrador. Detalhes em `GESTOR.md`.
 
+## Prospecção por Google
+Veja `PROSPECCAO.md`: busca empresas no Google Places e envia pela fila do SDR, com opt-out, supressão e aquecimento.
+
 ## Aquecimento de números (plano de 14 dias)
 Cada número novo segue um plano de envios ativos por dia, contado a partir do primeiro envio dele: 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100, 110 e 120 (depois vale o limite diário). Você edita o plano em **Envio e conexão > Ritmo**. Há um **freio automático**: se nos últimos 3 dias (com 15 envios ou mais) menos de 5% responderem, ou 4% ou mais pedirem para sair, o limite daquele número cai à metade até a taxa melhorar, e o painel mostra "segurando". O sistema **não** faz números conversarem entre si: isso é tráfego artificial que o WhatsApp penaliza. O que aquece de verdade é uso normal do chip, contatos que respondem e volume crescente.
 

@@ -11,3 +11,6 @@ tzdata
 cryptography
 # Leitura de PDF na base de conhecimento (divide o PDF em blocos)
 pypdf
+# Prospecção por Google Places
+requests
+phonenumbers

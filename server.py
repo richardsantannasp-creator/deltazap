@@ -1,7 +1,7 @@
 """SDR multi-nicho no WhatsApp com Claude: webhook + agentes editáveis + painel.
 Rodar: uvicorn server:app --port 8000
 """
-import os, re, io, csv, json, base64, secrets, smtplib, statistics, unicodedata, hmac, hashlib, sqlite3, subprocess, time, asyncio, random, math, zipfile, shutil, tempfile
+import os, re, io, csv, json, base64, secrets, smtplib, statistics, unicodedata, hmac, hashlib, sqlite3, subprocess, time, asyncio, random, math, zipfile, shutil, tempfile, threading, uuid
 from collections import defaultdict
 from contextlib import contextmanager
 from pathlib import Path
@@ -6387,6 +6387,7 @@ migrate_v17()
 AUDIT_SKIP = re.compile(r"^/(webhook|gateway/|pay/webhook/)|^/api/(push|simulate|simulate-file|contacts/parse|test-lead)\b|/suggest$|^/api/agent/status$")
 AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale; "T" indica onde está o alvo (grupo 1).
     ("POST", r"^/api/niches$", "Criou agente/nicho"), ("PUT", r"^/api/niches/(\d+)$", "Alterou agente/nicho"), ("DELETE", r"^/api/niches/(\d+)$", "Excluiu agente/nicho"),
+    ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
     ("POST", r"^/api/dispatch$", "Criou disparo"), ("PUT", r"^/api/pacing$", "Alterou ritmo de envio"), ("POST", r"^/api/outbox/pause$", "Pausou/retomou a fila de envio"), ("POST", r"^/api/outbox/clear$", "Limpou a fila de envio"),
     ("POST", r"^/api/connection/pair$", "Gerou código de conexão do WhatsApp"), ("POST", r"^/api/connection/logout$", "Desconectou o WhatsApp"),
     ("POST", r"^/api/lines$", "Adicionou número de WhatsApp"), ("PUT", r"^/api/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/lines/([\w-]+)$", "Removeu número de WhatsApp"),
@@ -7362,3 +7363,281 @@ async def kb_pdf(b: KbPdfIn):
     title = re.sub(r"\.pdf$", "", b.filename, flags=re.I)[:100]
     log("base", f"PDF «{title}» lido: {pages or '?'} página(s), {len(body)} caracteres (rascunho)")
     return {"title": title, "body": body, "pages": pages, "warnings": warnings}
+
+
+# ======================================================================
+# v23: Prospecção — busca de empresas no Google Places (API oficial) e envio pela fila do SDR
+# ======================================================================
+PROSPECT_DEMO = os.environ.get("PROSPECT_DEMO") == "1"
+PROSPECT_KEEP_DAYS = 30           # os termos do Google limitam guardar os dados das buscas; o que não virou lead some depois disso
+PROSPECT_STATUS = ["Novo", "Na fila", "Contatado", "Respondeu", "Sem interesse", "Não contatar"]
+PROSPECT_JOBS = {}
+
+def migrate_v23():
+    with conn() as c:
+        c.executescript("""CREATE TABLE IF NOT EXISTS prospects(place_id TEXT PRIMARY KEY, name TEXT, phone TEXT, e164 TEXT, ptype TEXT, whatsapp TEXT, wa_origin TEXT,
+            address TEXT, site TEXT, email TEXT, instagram TEXT, rating REAL, n_rating INTEGER, maps TEXT, term TEXT, city TEXT, status TEXT DEFAULT 'Novo',
+            notes TEXT DEFAULT '', search_id INTEGER, created REAL, enriched REAL, queued_at REAL);
+          CREATE TABLE IF NOT EXISTS prospect_searches(id INTEGER PRIMARY KEY AUTOINCREMENT, created REAL, terms TEXT, city TEXT, mode TEXT, calls INTEGER DEFAULT 0, total INTEGER DEFAULT 0, new INTEGER DEFAULT 0, done INTEGER DEFAULT 0);
+          CREATE TABLE IF NOT EXISTS prospect_cache(k TEXT PRIMARY KEY, v TEXT, ts REAL);""")
+migrate_v23()
+
+def prospect_key():
+    return os.environ.get("GOOGLE_PLACES_API_KEY", "").strip()
+
+def prospect_purge():
+    lim = time.time() - PROSPECT_KEEP_DAYS * 86400
+    with conn() as c:
+        c.execute("DELETE FROM prospects WHERE queued_at IS NULL AND created<?", (lim,))
+        c.execute("DELETE FROM prospect_cache WHERE ts<?", (lim,))
+
+def _prospect_cache_get(k):
+    with conn() as c:
+        r = c.execute("SELECT v FROM prospect_cache WHERE k=? AND ts>?", (k, time.time() - PROSPECT_KEEP_DAYS * 86400)).fetchone()
+    return json.loads(r["v"]) if r else None
+
+def _prospect_cache_set(k, v):
+    with conn() as c:
+        c.execute("INSERT OR REPLACE INTO prospect_cache(k,v,ts) VALUES(?,?,?)", (k, json.dumps(v), time.time()))
+
+class ProspectSearchIn(BaseModel):
+    terms: str
+    city: str
+    mode: str = "rapido"          # rapido (até 60 por nicho) | grade (cobre a cidade em quadrantes)
+    max_calls: int = 60
+    depth: int = 3
+    sites: bool = True            # procurar o WhatsApp divulgado no site da empresa
+    use_cache: bool = True
+
+class ProspectPatchIn(BaseModel):
+    status: str | None = None
+    notes: str | None = None
+
+class ProspectImportIn(BaseModel):
+    ids: list[str]
+    niche_id: int
+    line: str = ""
+    ack: bool = False             # operador confirma a base legal e a abordagem
+    include_probable: bool = False  # inclui "provável celular" (sem WhatsApp confirmado no site)
+
+class ProspectExportIn(BaseModel):
+    ids: list[str] = []
+
+def _prospect_run(job, p):
+    import places_core as ext, places_enrich as enr
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    cancel = lambda: job["cancel"]
+    try:
+        cli = ext.PlacesClient(p["key"], demo=PROSPECT_DEMO)
+        terms = p["terms"]
+        with conn() as c:
+            sid = c.execute("INSERT INTO prospect_searches(created,terms,city,mode) VALUES(?,?,?,?)", (time.time(), "; ".join(terms), p["city"], p["mode"])).lastrowid
+        job["search_id"] = sid
+        cg = _prospect_cache_get if p["use_cache"] else None
+        got, area = {}, None
+        if p["mode"] == "grade":
+            job["msg"] = f"Localizando a área de {p['city']}..."
+            ka = "area|" + p["city"].lower()
+            area = (cg(ka) if cg else None) or cli.area_da_cidade(p["city"])
+            _prospect_cache_set(ka, area)
+        for i, term in enumerate(terms):
+            if cancel():
+                break
+            if p["mode"] == "grade":
+                def prog(celulas, pendentes, encontrados, term=term):
+                    job.update(msg=f'"{term}": {celulas} áreas varridas, {pendentes} na fila', calls=cli.chamadas, found=len(got) + encontrados,
+                               pct=min(70, int(70 * cli.chamadas / max(1, p["max_calls"]))))
+                found, over = ext.buscar_grade(cli, term, area, p["depth"], p["max_calls"], cg, _prospect_cache_set, prog, cancel)
+                if over:
+                    job["warnings"].append(f'Limite de {p["max_calls"]} chamadas atingido em "{term}": resultado parcial.')
+            else:
+                job.update(msg=f'Buscando "{term}"...', pct=int(70 * i / len(terms)))
+                k = f"txt|{term.lower()}|{p['city'].lower()}"
+                lst = cg(k) if cg else None
+                if lst is None:
+                    lst, done = cli.buscar_texto(f"{term} em {p['city']}", cancelado=cancel)
+                    if done:
+                        _prospect_cache_set(k, lst)
+                found = {x["id"]: x for x in lst}
+            for pid, pl in found.items():
+                got.setdefault(pid, (pl, term))
+            job.update(calls=cli.chamadas, found=len(got))
+        rows = [ext.montar_linha(l, t) for l, t in got.values() if l.get("businessStatus", "OPERATIONAL") == "OPERATIONAL"]
+        new = 0
+        now = time.time()
+        with conn() as c:
+            for r in rows:
+                if c.execute("SELECT 1 FROM prospects WHERE place_id=?", (r["place_id"],)).fetchone():
+                    c.execute("UPDATE prospects SET search_id=? WHERE place_id=?", (sid, r["place_id"]))  # já conhecida: não perde status nem notas
+                    continue
+                new += 1
+                c.execute("INSERT INTO prospects(place_id,name,phone,e164,ptype,whatsapp,wa_origin,address,site,rating,n_rating,maps,term,city,search_id,created) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                          (r["place_id"], r["nome"], r["telefone"], r["e164"], r["tipo"], r["whatsapp"], r["whatsapp_origem"], r["endereco"], r["site"], r["avaliacao"], r["n_avaliacoes"], r["maps"], r["termo"], p["city"], sid, now))
+        if p["sites"] and not cancel():
+            with conn() as c:
+                pend = [dict(x) for x in c.execute("SELECT place_id,site FROM prospects WHERE search_id=? AND site<>'' AND enriched IS NULL", (sid,))]
+            hits = 0
+            if pend:
+                with ThreadPoolExecutor(6) as ex:
+                    futs = {ex.submit(enr.enriquecer_site, r["site"], demo=PROSPECT_DEMO): r["place_id"] for r in pend}
+                    for k, f in enumerate(as_completed(futs), 1):
+                        if cancel():
+                            for x in futs:
+                                x.cancel()
+                            break
+                        try:
+                            d = f.result()
+                        except Exception:
+                            d = {}
+                        hits += bool(d.get("whatsapp"))
+                        with conn() as c:
+                            c.execute("UPDATE prospects SET enriched=?, email=COALESCE(NULLIF(?,''),email), instagram=COALESCE(NULLIF(?,''),instagram) WHERE place_id=?",
+                                      (time.time(), d.get("email", ""), d.get("instagram", ""), futs[f]))
+                            if d.get("whatsapp"):
+                                c.execute("UPDATE prospects SET whatsapp=?, wa_origin=? WHERE place_id=?", (d["whatsapp"], ext.ORIGEM_SITE, futs[f]))
+                        job.update(msg=f"Procurando WhatsApp nos sites: {k}/{len(pend)} ({hits} encontrados)", pct=70 + int(30 * k / len(pend)))
+        with conn() as c:
+            c.execute("UPDATE prospect_searches SET calls=?,total=?,new=?,done=1 WHERE id=?", (cli.chamadas, len(rows), new, sid))
+        job.update(state="cancelado" if cancel() else "concluido", pct=100, calls=cli.chamadas, total=len(rows), new=new, msg="Concluído")
+        log("prospecção", f"busca «{'; '.join(terms)}» em {p['city']}: {len(rows)} empresa(s), {new} nova(s), {cli.chamadas} chamada(s) à API")
+    except Exception as e:  # noqa
+        job.update(state="erro", error=str(e)[:300] if e.__class__.__name__ == "ErroAPI" else f"Erro inesperado: {str(e)[:200]}")
+
+@app.get("/api/prospect/config", dependencies=[Depends(auth)])
+async def prospect_config():
+    return {"has_key": bool(prospect_key()), "demo": PROSPECT_DEMO, "statuses": PROSPECT_STATUS, "keep_days": PROSPECT_KEEP_DAYS}
+
+@app.post("/api/prospect/search", dependencies=[Depends(auth)])
+async def prospect_search(b: ProspectSearchIn):
+    key = prospect_key()
+    if not key and not PROSPECT_DEMO:
+        raise HTTPException(400, "Falta a chave do Google Places no servidor (GOOGLE_PLACES_API_KEY no arquivo .env). Veja o passo a passo em PROSPECCAO.md.")
+    terms = list(dict.fromkeys(t.strip()[:80] for t in b.terms.replace("\n", ";").split(";") if t.strip()))[:10]
+    city = " ".join(b.city.split())[:100]
+    if not terms or not city:
+        raise HTTPException(400, "Informe pelo menos um nicho e a cidade")
+    if any(j["state"] == "rodando" for j in PROSPECT_JOBS.values()):
+        raise HTTPException(400, "Já há uma busca em andamento. Espere terminar ou cancele.")
+    prospect_purge()
+    p = {"terms": terms, "city": city, "key": key, "mode": "grade" if b.mode == "grade" else "rapido", "depth": max(1, min(b.depth, 4)),
+         "max_calls": max(3, min(b.max_calls, 300)), "sites": b.sites, "use_cache": b.use_cache}
+    jid = uuid.uuid4().hex[:10]
+    PROSPECT_JOBS[jid] = {"state": "rodando", "msg": "Iniciando...", "pct": 0, "calls": 0, "found": 0, "warnings": [], "cancel": False, "search_id": None, "error": ""}
+    threading.Thread(target=_prospect_run, args=(PROSPECT_JOBS[jid], p), daemon=True).start()
+    return {"job_id": jid}
+
+@app.get("/api/prospect/job/{jid}", dependencies=[Depends(auth)])
+async def prospect_job(jid: str):
+    j = PROSPECT_JOBS.get(jid)
+    if not j:
+        raise HTTPException(404, "Busca não encontrada")
+    return {k: v for k, v in j.items() if k != "cancel"}
+
+@app.post("/api/prospect/job/{jid}/cancel", dependencies=[Depends(auth)])
+async def prospect_job_cancel(jid: str):
+    if jid in PROSPECT_JOBS:
+        PROSPECT_JOBS[jid]["cancel"] = True
+        PROSPECT_JOBS[jid]["msg"] = "Cancelando..."
+    return {"ok": True}
+
+def _prospect_flags(rows):
+    """Marca quem já é lead, quem pediu para sair/não contatar e o estágio do lead."""
+    with conn() as c:
+        leads = {r["phone"]: r["stage"] for r in c.execute("SELECT phone,stage FROM leads WHERE test=0")}
+    out = []
+    for r in rows:
+        r = dict(r)
+        num = re.sub(r"\D", "", r.get("whatsapp") or "")
+        r["blocked"] = r["status"] == "Não contatar" or any(is_suppressed(x) for x in {num, re.sub(r"\D", "", r.get("e164") or "")} if x)
+        r["lead_stage"] = leads.get(num, "")
+        r["link"] = "" if r["blocked"] or not num else "https://wa.me/" + num
+        out.append(r)
+    return out
+
+@app.get("/api/prospect/list", dependencies=[Depends(auth)])
+async def prospect_list(search: int = 0, status: str = "", only_wa: int = 0):
+    prospect_purge()
+    q, a = "SELECT * FROM prospects WHERE 1=1", []
+    if search:
+        q += " AND search_id=?"; a.append(search)
+    if status:
+        q += " AND status=?"; a.append(status)
+    if only_wa:
+        q += " AND whatsapp<>''"
+    with conn() as c:
+        rows = c.execute(q + " ORDER BY (wa_origin='Site da empresa') DESC, (whatsapp<>'') DESC, name LIMIT 2000", a).fetchall()
+        searches = [dict(r) for r in c.execute("SELECT * FROM prospect_searches WHERE done=1 ORDER BY id DESC LIMIT 30")]
+    return {"rows": _prospect_flags(rows), "searches": searches}
+
+@app.put("/api/prospect/{pid}", dependencies=[Depends(auth)])
+async def prospect_patch(pid: str, b: ProspectPatchIn):
+    with conn() as c:
+        r = c.execute("SELECT * FROM prospects WHERE place_id=?", (pid,)).fetchone()
+        if not r:
+            raise HTTPException(404, "Empresa não encontrada")
+        if b.status is not None:
+            if b.status not in PROSPECT_STATUS:
+                raise HTTPException(400, "Status inválido")
+            c.execute("UPDATE prospects SET status=? WHERE place_id=?", (b.status, pid))
+        if b.notes is not None:
+            c.execute("UPDATE prospects SET notes=? WHERE place_id=?", (b.notes[:2000], pid))
+    if b.status == "Não contatar":
+        for n in {r["whatsapp"], r["e164"]}:
+            if n:
+                suppress(n, "prospecção: não contatar")
+        lgpd_record("supressão", "empresa marcada como «Não contatar» na prospecção")
+    return {"ok": True}
+
+@app.post("/api/prospect/import", dependencies=[Depends(auth)])
+async def prospect_import(b: ProspectImportIn, bg: BackgroundTasks):
+    """Põe as empresas escolhidas na fila de envio do SDR. Passa por todas as regras do disparo (supressão, ritmo, aquecimento, campos do nicho)."""
+    if not b.ack:
+        raise HTTPException(400, "Confirme a base legal e a abordagem antes de enfileirar (caixa de confirmação)")
+    ids = list(dict.fromkeys(b.ids))[:100]
+    if not ids:
+        raise HTTPException(400, "Escolha as empresas")
+    rows = []
+    with conn() as c:
+        for i in ids:
+            r = c.execute("SELECT * FROM prospects WHERE place_id=?", (i,)).fetchone()
+            if r:
+                rows.append(dict(r))
+    use, skipped = [], {"sem_whatsapp": 0, "provavel": 0, "nao_contatar": 0}
+    for r in _prospect_flags(rows):
+        if not r["whatsapp"]:
+            skipped["sem_whatsapp"] += 1
+        elif r["blocked"]:
+            skipped["nao_contatar"] += 1
+        elif r["wa_origin"] != "Site da empresa" and not b.include_probable:
+            skipped["provavel"] += 1
+        else:
+            use.append(r)
+    if not use:
+        raise HTTPException(400, "Nenhuma das empresas escolhidas tem WhatsApp confirmado no site (ou já está bloqueada). Marque «incluir provável celular» se quiser arriscar os demais.")
+    clean = lambda s: re.sub(r"[;,\t\r\n]+", " ", s or "").strip()
+    lines = "\n".join(f"{r['whatsapp']};{clean(r['name'])};{clean(r['name'])};Empresa encontrada no Google ({clean(r['term'])}, {clean(r['city'])}). Contato comercial publicado pela própria empresa." for r in use)
+    origem = f"Prospecção B2B — Google Places, {time.strftime('%d/%m/%Y')}: número comercial divulgado pela empresa ({'no site dela' if not b.include_probable else 'site ou cadastro do Google'}). Sem opt-in prévio; base legal: legítimo interesse."
+    res = await dispatch(DispatchIn(niche_id=b.niche_id, lines=lines, consent=True, line=b.line, origem=origem), bg)
+    with conn() as c:
+        for r in use:
+            ph = norm_phone(r["whatsapp"])
+            if ph and c.execute("SELECT 1 FROM outbox WHERE phone=? AND status='queued'", (ph,)).fetchone():
+                c.execute("UPDATE prospects SET status='Na fila', queued_at=? WHERE place_id=? AND status='Novo'", (time.time(), r["place_id"]))
+    lgpd_record("prospecção", f"{res.get('queued', 0)} empresa(s) da prospecção enfileiradas; base legal: legítimo interesse (B2B)")
+    return {**res, "skipped": skipped}
+
+@app.post("/api/prospect/export", dependencies=[Depends(auth)])
+async def prospect_export(b: ProspectExportIn):
+    rows = []
+    with conn() as c:
+        for i in b.ids[:2000]:
+            r = c.execute("SELECT * FROM prospects WHERE place_id=?", (i,)).fetchone()
+            if r:
+                rows.append(dict(r))
+    out = io.StringIO()
+    w = csv.writer(out, delimiter=";")
+    w.writerow(["nome", "whatsapp", "origem do whatsapp", "telefone", "email", "instagram", "endereco", "site", "nicho", "cidade", "status"])
+    for r in _prospect_flags(rows):
+        if not r["blocked"]:
+            w.writerow([csv_safe(r["name"]), r["whatsapp"], r["wa_origin"], r["phone"], csv_safe(r["email"] or ""), r["instagram"] or "", csv_safe(r["address"] or ""), r["site"] or "", csv_safe(r["term"] or ""), csv_safe(r["city"] or ""), r["status"]])
+    return {"csv": "﻿" + out.getvalue()}

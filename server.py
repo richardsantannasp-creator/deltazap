@@ -5491,6 +5491,18 @@ EVAL_PERSONAS = {
              "instrucao": "Na primeira mensagem peça informação sobre o que a empresa vende. Na segunda mensagem escreva apenas: SAIR"},
 }
 EVAL_DEFAULT = ["pronto", "pechincha", "fora", "injecao", "robo", "sair"]
+
+def persona_def(pid):
+    """Cenário fixo ou caso real (caso_N): o caso real reproduz as mensagens de um cliente de verdade, sem inventar nada."""
+    if pid in EVAL_PERSONAS:
+        return EVAL_PERSONAS[pid]
+    m = re.fullmatch(r"caso_(\d+)", str(pid))
+    if m:
+        with conn() as c:
+            r = c.execute("SELECT * FROM eval_cases WHERE id=?", (int(m.group(1)),)).fetchone()
+        if r:
+            return {"nome": "Caso real: " + r["name"], "instrucao": "Reproduz as mensagens de um cliente real (resultado original: " + (r["outcome"] or "sem desfecho") + ").", "real": True, "case_id": r["id"], "niche_id": r["niche_id"]}
+    return None
 EVAL_RUNNING = {"id": None}
 LEAK_MARKERS = ("# PAPEL", "REGRAS DE VENDA", "Regras gerais (valem", "BASE DE CONHECIMENTO", "gerar_link_pagamento", "atualizar_crm", "transferir_para_humano", "encaminhar_ao_vendedor")
 URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
@@ -5605,10 +5617,17 @@ def _parse_json(txt):
     return d if isinstance(d, dict) else None
 
 async def sim_lead_message(persona, niche, transcript, kind_phone):
+    pd_ = persona_def(persona)
+    if pd_ and pd_.get("real"):                              # reprodução: devolve a próxima fala real do cliente (sem chamar o Claude)
+        with conn() as c:
+            r = c.execute("SELECT script FROM eval_cases WHERE id=?", (pd_["case_id"],)).fetchone()
+        script = json.loads(r["script"]) if r else []
+        n = sum(1 for m in transcript if m["role"] == "lead")
+        return script[n] if n < len(script) else "[FIM]"
     prods = products_for(niche["id"])
     pub = "; ".join(f"{p['name']} ({brl(p['price_cents'])})" for p in prods[:8]) or "(não sei o que vendem)"
     system = [{"type": "text", "text": (f"Você simula um cliente brasileiro conversando por WhatsApp com a assistente de uma empresa do nicho \"{niche['name']}\". "
-              f"Perfil: {EVAL_PERSONAS[persona]['instrucao']}\nO que você sabe do negócio (público): {pub}.\n"
+              f"Perfil: {persona_def(persona)['instrucao']}\nO que você sabe do negócio (público): {pub}.\n"
               "Regras: escreva só a próxima mensagem do cliente, em português informal, 1 a 2 frases, sem aspas. Nunca saia do papel. "
               "Se a conversa chegou a um fim natural (comprou, desistiu ou foi encaminhado), responda exatamente [FIM].")}]
     msgs = []
@@ -5629,7 +5648,7 @@ async def judge_run(persona, niche, transcript, kind_phone):
         docs = "\n\n".join(f"## {r['title']}\n{r['body']}" for r in c.execute("SELECT title,body FROM kb_docs WHERE niche_id=? ORDER BY id", (niche["id"],)))
     ref = f"CATÁLOGO:\n{prods}\n\nBASE:\n{(niche.get('knowledge') or '')[:3000]}\n{docs[:5000]}\n\nINSTRUÇÕES DO NICHO (resumo):\n{niche['prompt'][:2500]}"
     conv = "\n".join(("CLIENTE: " if m["role"] == "lead" else "ASSISTENTE: ") + m["text"] for m in transcript)
-    user = f"{ref}\n\nTIPO DE CLIENTE SIMULADO: {EVAL_PERSONAS[persona]['nome']} — {EVAL_PERSONAS[persona]['instrucao']}\n\nCONVERSA:\n{conv}"
+    user = f"{ref}\n\nTIPO DE CLIENTE SIMULADO: {persona_def(persona)['nome']} — {persona_def(persona)['instrucao']}\n\nCONVERSA:\n{conv}"
     try:
         r = await claude_create("avaliacao", kind_phone, niche["id"], max_tokens=500, system=[{"type": "text", "text": JUDGE_SYSTEM}], messages=[{"role": "user", "content": user}])
         d = _parse_json("".join(b.text for b in r.content if b.type == "text"))
@@ -5685,7 +5704,7 @@ async def eval_one(run_id, idx, persona, niche, turns, variant):
         hard = sum(1 for c_ in checks if c_["hard"] and not c_["ok"])
         base = (sum(judge["scores"].values()) / 5 * 20) if judge else 70.0
         score = max(0.0, min(100.0, base - 30 * hard))
-        return {"persona": persona, "nome": EVAL_PERSONAS[persona]["nome"], "transcript": transcript, "checks": checks, "judge": judge, "judge_error": jerr,
+        return {"persona": persona, "nome": persona_def(persona)["nome"], "transcript": transcript, "checks": checks, "judge": judge, "judge_error": jerr,
                 "orders": [{"produto": o["product_name"], "qtd": o["qty"], "desconto": o["discount_pct"], "total": o["total_cents"]} for o in orders],
                 "final_stage": lead["stage"] if lead else "", "hard_fails": hard, "score": round(score, 1)}
     finally:
@@ -5708,14 +5727,14 @@ async def eval_execute(run_id):
     try:
         for i, pid_ in enumerate(personas):
             with conn() as c:
-                c.execute("UPDATE eval_runs SET progress=? WHERE id=?", (f"{i}/{len(personas)}: {EVAL_PERSONAS[pid_]['nome']}", run_id))
+                c.execute("UPDATE eval_runs SET progress=? WHERE id=?", (f"{i}/{len(personas)}: {persona_def(pid_)['nome']}", run_id))
             try:
                 results.append(await eval_one(run_id, i, pid_, niche, run["turns"], run["variant"]))
             except BudgetExceeded as e:
                 err = str(e); break
             except Exception as e:
                 log("erro", f"avaliação, {pid_}: {e}")
-                results.append({"persona": pid_, "nome": EVAL_PERSONAS[pid_]["nome"], "transcript": [], "checks": [], "judge": None, "judge_error": f"falhou: {e}"[:150],
+                results.append({"persona": pid_, "nome": persona_def(pid_)["nome"], "transcript": [], "checks": [], "judge": None, "judge_error": f"falhou: {e}"[:150],
                                 "orders": [], "final_stage": "", "hard_fails": 0, "score": 0.0, "erro": True})
         done = [r for r in results if not r.get("erro")]
         score = round(sum(r["score"] for r in done) / len(done), 1) if done else None
@@ -5743,7 +5762,7 @@ def _eval_args(b):
     niche = get_niche(b.niche_id)
     if not niche:
         raise HTTPException(404, "nicho não encontrado")
-    personas = [p for p in (b.personas or EVAL_DEFAULT) if p in EVAL_PERSONAS]
+    personas = [p for p in (b.personas or EVAL_DEFAULT) if persona_def(p)]
     if not personas:
         raise HTTPException(400, "Escolha pelo menos um cenário")
     if not 2 <= b.turns <= 10:
@@ -5754,7 +5773,10 @@ def _eval_args(b):
 
 @app.get("/api/eval/personas", dependencies=[Depends(auth)])
 async def eval_personas():
-    return {"personas": [{"id": k, "nome": v["nome"], "instrucao": v["instrucao"], "padrao": k in EVAL_DEFAULT} for k, v in EVAL_PERSONAS.items()]}
+    with conn() as c:
+        cases = [dict(r) for r in c.execute("SELECT id,name,outcome,niche_id FROM eval_cases ORDER BY id DESC")]
+    return {"personas": [{"id": k, "nome": v["nome"], "instrucao": v["instrucao"], "padrao": k in EVAL_DEFAULT} for k, v in EVAL_PERSONAS.items()]
+            + [{"id": f"caso_{x['id']}", "nome": "Caso real: " + x["name"], "instrucao": "Reproduz um cliente real (resultado original: " + (x["outcome"] or "sem desfecho") + ").", "padrao": False, "real": True, "niche_id": x["niche_id"]} for x in cases]}
 
 @app.post("/api/eval/estimate", dependencies=[Depends(auth)])
 async def eval_estimate_api(b: EvalIn):
@@ -6366,6 +6388,7 @@ AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale;
     ("POST", r"^/api/managers$", "Criou gestor"), ("PUT", r"^/api/managers/(\d+)$", "Alterou gestor"), ("DELETE", r"^/api/managers/(\d+)$", "Excluiu gestor"),
     ("POST", r"^/api/tags$", "Criou etiqueta"), ("PUT", r"^/api/tags/(\d+)$", "Alterou etiqueta"), ("DELETE", r"^/api/tags/(\d+)$", "Excluiu etiqueta"),
     ("PUT", r"^/api/warmup$", "Alterou o plano de aquecimento dos números"),
+    ("POST", r"^/api/eval/cases$", "Criou caso de teste a partir de conversa real"), ("DELETE", r"^/api/eval/cases/(\d+)$", "Excluiu caso de teste"),
     ("POST", r"^/api/flows$", "Criou roteiro"), ("PUT", r"^/api/flows/(\d+)$", "Alterou roteiro"), ("DELETE", r"^/api/flows/(\d+)$", "Excluiu roteiro"),
     ("POST", r"^/api/agent/notes/(\d+)$", "Anotou no lead"), ("POST", r"^/api/agent/send/(\d+)$", "Respondeu o lead"), ("POST", r"^/api/agent/claim/(\d+)$", "Assumiu a conversa"),
     ("POST", r"^/api/agent/release/(\d+)$", "Devolveu a conversa à IA"), ("POST", r"^/api/agent/transfer/(\d+)$", "Transferiu a conversa"), ("POST", r"^/api/agent/outcome/(\d+)$", "Definiu resultado do lead"),
@@ -7103,3 +7126,141 @@ async def warmup_put(b: dict):
         raise HTTPException(400, "Plano agressivo demais para um número novo: no máximo 30 no 1º dia e 100 no 7º")
     set_setting("warmup_plan", json.dumps(pl))
     return {"ok": True, "plan": pl}
+
+
+# ======================================================================
+# v22: aprender com as conversas reais (casos de teste e relatório de insights)
+# ======================================================================
+def migrate_v22():
+    with conn() as c:
+        c.executescript("""CREATE TABLE IF NOT EXISTS eval_cases(id INTEGER PRIMARY KEY AUTOINCREMENT, niche_id INTEGER, name TEXT, script TEXT, outcome TEXT DEFAULT '', created REAL);""")
+migrate_v22()
+
+def redact_text(t):
+    """Tira dados pessoais óbvios antes de guardar ou mostrar trechos de conversas reais."""
+    t = re.sub(r"[\w.+-]+@[\w-]+\.[\w.-]+", "[e-mail]", t or "")
+    t = re.sub(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b", "[cpf]", t)
+    t = re.sub(r"\+?\d[\d\s().-]{7,}\d", "[telefone]", t)
+    return t.strip()
+
+OBJECTIONS = [
+    ("preco", "Preço / achou caro", ["caro", "preço", "preco", "valor", "quanto custa", "quanto é", "desconto", "mais barato"]),
+    ("ja_tem", "Já tem fornecedor ou plano", ["já tenho", "ja tenho", "já uso", "ja uso", "já sou cliente", "ja sou cliente", "tenho plano"]),
+    ("sem_tempo", "Sem tempo / ocupado", ["sem tempo", "ocupado", "ocupada", "estou trabalhando", "não posso agora", "nao posso agora"]),
+    ("sem_interesse", "Sem interesse", ["sem interesse", "não tenho interesse", "nao tenho interesse", "não quero", "nao quero", "não preciso", "nao preciso"]),
+    ("mandar_info", "Pediu para mandar por e-mail ou mais informações", ["por email", "por e-mail", "manda as informações", "manda informações", "me envia", "me manda", "material"]),
+    ("decisor", "Precisa falar com outra pessoa", ["sócio", "socio", "esposa", "marido", "meu chefe", "falar com", "decidir juntos", "ver com"]),
+    ("depois", "Deixou para depois", ["depois", "mais tarde", "mês que vem", "mes que vem", "semana que vem", "outro momento", "agora não", "agora nao"]),
+    ("confianca", "Desconfiança / golpe", ["golpe", "é verdade", "e verdade", "como conseguiu meu", "quem é você", "quem e voce", "de onde você", "de onde voce", "confiável", "confiavel"]),
+]
+POSITIVE_STAGES = ("reuniao_agendada", "encaminhado", "humano")
+POSITIVE_OUTCOMES = ("ganho", "cotacao_enviada")
+TERMINAL_STAGES = ("reuniao_agendada", "encaminhado", "humano", "descartado")
+
+def insights_report(niche_id, days=30):
+    days = max(7, min(int(days or 30), 180)); now = time.time(); since = now - days * 86400
+    with conn() as c:
+        leads = [dict(r) for r in c.execute("SELECT phone,name,stage,outcome,created FROM leads WHERE test=0 AND niche_id=? AND created>=? ORDER BY created DESC LIMIT 3000", (niche_id, since))]
+        phones = [l["phone"] for l in leads]
+        msgs = defaultdict(list)
+        for i in range(0, len(phones), 500):
+            chunk = phones[i:i + 500]
+            for r in c.execute(f"SELECT phone,role,text,ts FROM messages WHERE phone IN ({','.join('?' * len(chunk))}) ORDER BY id", chunk):
+                msgs[r["phone"]].append((r["role"], r["text"], r["ts"]))
+        sent = [dict(r) for r in c.execute("SELECT o.phone,o.sent_at FROM outbox o WHERE o.status='sent' AND o.niche_id=? AND o.sent_at>=?", (niche_id, since))]
+    def positive(l):
+        return l["stage"] in POSITIVE_STAGES or l["outcome"] in POSITIVE_OUTCOMES
+    replied = [l for l in leads if any(m[0] == "lead" for m in msgs[l["phone"]])]
+    # onde os leads somem
+    ghosted, buckets, last_q = [], {"1": 0, "2": 0, "3": 0, "4+": 0}, defaultdict(lambda: {"n": 0, "ex": ""})
+    for l in replied:
+        ms = msgs[l["phone"]]
+        if l["stage"] in TERMINAL_STAGES or l["outcome"] in POSITIVE_OUTCOMES or l["outcome"] in ("perdido",):
+            continue
+        if now - ms[-1][2] < 72 * 3600:
+            continue
+        ghosted.append(l)
+        nl = sum(1 for m in ms if m[0] == "lead")
+        buckets["4+" if nl >= 4 else str(nl)] += 1
+        if ms[-1][0] == "sdr":
+            key = re.sub(r"\d+", "#", norm(ms[-1][1]))[:50]
+            last_q[key]["n"] += 1; last_q[key]["ex"] = redact_text(ms[-1][1])[:220]
+    top_last = sorted(({"n": v["n"], "text": v["ex"]} for v in last_q.values()), key=lambda x: -x["n"])[:5]
+    # objeções
+    obj = {k: {"id": k, "nome": nome, "leads": 0, "continued": 0, "positive": 0, "examples": []} for k, nome, _ in OBJECTIONS}
+    for l in leads:
+        ms = msgs[l["phone"]]; done = set()
+        for i, (role, text, _) in enumerate(ms):
+            if role != "lead":
+                continue
+            nt = norm(text)
+            for k, _n, words in OBJECTIONS:
+                if k in done or not any(norm(w) in nt for w in words):
+                    continue
+                done.add(k); o = obj[k]; o["leads"] += 1
+                nxt = next((j for j in range(i + 1, len(ms)) if ms[j][0] in ("sdr", "humano")), None)
+                cont = nxt is not None and any(m[0] == "lead" for m in ms[nxt + 1:])
+                o["continued"] += cont; pos = positive(l); o["positive"] += pos
+                if cont and pos and nxt is not None and len(o["examples"]) < 3:
+                    o["examples"].append({"lead": redact_text(text)[:160], "reply": redact_text(ms[nxt][1])[:260]})
+    objections = [{**o, "continued_pct": round(o["continued"] * 100 / o["leads"]) if o["leads"] else 0, "positive_pct": round(o["positive"] * 100 / o["leads"]) if o["leads"] else 0}
+                  for o in obj.values() if o["leads"]]
+    objections.sort(key=lambda o: -o["leads"])
+    # conversas que deram certo
+    winners = []
+    for l in leads:
+        nl = sum(1 for m in msgs[l["phone"]] if m[0] == "lead")
+        if positive(l) and nl >= 2:
+            winners.append({"phone": l["phone"], "name": l["name"] or "", "stage": l["stage"], "outcome": l["outcome"], "lead_msgs": nl})
+    winners = winners[:10]
+    # melhores horários de envio
+    by_h = defaultdict(lambda: [0, 0])
+    first_reply = {}
+    for l in replied:
+        t0 = next((m[2] for m in msgs[l["phone"]] if m[0] == "lead"), None)
+        first_reply[l["phone"]] = t0
+    for r in sent:
+        h = datetime.fromtimestamp(r["sent_at"], TZ).hour
+        by_h[h][0] += 1
+        fr = first_reply.get(r["phone"])
+        if fr and fr > r["sent_at"]:
+            by_h[h][1] += 1
+    hours = [{"hour": h, "sent": n, "reply_pct": round(rp * 100 / n)} for h, (n, rp) in sorted(by_h.items()) if n >= 5]
+    return {"niche_id": niche_id, "days": days, "leads": len(leads), "replied": len(replied), "positive": sum(1 for l in leads if positive(l)),
+            "ghosted": {"total": len(ghosted), "by_replies": buckets, "last_agent_message": top_last},
+            "objections": objections, "winners": winners, "hours": hours}
+
+@app.get("/api/insights", dependencies=[Depends(auth)])
+async def insights_get(niche_id: int, days: int = 30):
+    if not get_niche(niche_id):
+        raise HTTPException(404, "nicho não encontrado")
+    with conn() as c:
+        cases = [dict(r) for r in c.execute("SELECT id,name,outcome,created FROM eval_cases WHERE niche_id=? ORDER BY id DESC", (niche_id,))]
+    return {**insights_report(niche_id, days), "cases": cases}
+
+class CaseIn(BaseModel):
+    phone: str
+    name: str = ""
+
+@app.post("/api/eval/cases", dependencies=[Depends(auth)])
+async def eval_case_add(b: CaseIn):
+    """Guarda as falas do cliente de uma conversa real como caso de teste (sem telefone e sem dados pessoais óbvios)."""
+    lead = get_lead(b.phone)
+    if not lead or lead["test"]:
+        raise HTTPException(404, "Conversa não encontrada")
+    with conn() as c:
+        script = [redact_text(r["text"])[:400] for r in c.execute("SELECT text FROM messages WHERE phone=? AND role='lead' ORDER BY id LIMIT 12", (b.phone,)) if (r["text"] or "").strip()]
+        if len(script) < 2:
+            raise HTTPException(400, "A conversa precisa de pelo menos 2 mensagens do cliente")
+        if c.execute("SELECT COUNT(*) n FROM eval_cases").fetchone()["n"] >= 50:
+            raise HTTPException(400, "Limite de 50 casos: apague os que não usa mais")
+        name = " ".join((b.name or "").split())[:50] or f"{(lead['stage'] or 'conversa')} #{int(time.time()) % 10000}"
+        cid = c.execute("INSERT INTO eval_cases(niche_id,name,script,outcome,created) VALUES(?,?,?,?,?)",
+                        (lead["niche_id"], name, json.dumps(script, ensure_ascii=False), lead["outcome"] or lead["stage"] or "", time.time())).lastrowid
+    return {"ok": True, "id": cid, "persona": f"caso_{cid}", "messages": len(script)}
+
+@app.delete("/api/eval/cases/{cid}", dependencies=[Depends(auth)])
+async def eval_case_del(cid: int):
+    with conn() as c:
+        c.execute("DELETE FROM eval_cases WHERE id=?", (cid,))
+    return {"ok": True}

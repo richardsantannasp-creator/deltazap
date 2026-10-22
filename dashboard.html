@@ -172,6 +172,7 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 <div class="note" style="padding:0 12px 12px" id="ffu"></div>
 <div style="padding:0 12px 12px"><h3 style="margin:8px 0;font-size:14px">Vendas pelo WhatsApp</h3><div class="kpis" id="okpi"></div>
 <table><thead><tr><th>Quando</th><th>Lead</th><th>Produto</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody id="ordl"></tbody></table><div class="note" id="ordn"></div></div></div></section>
+<section class="col" style="grid-column:1/-1"><h2><span>Aprender com as conversas <span class="note">onde os leads somem, objeções e o que funcionou</span></span><span><select id="in_n" style="width:auto"></select> <select id="in_d" style="width:auto"><option value="30" selected>30 dias</option><option value="90">90 dias</option></select></span></h2><div class="scroll"><div style="padding:12px" id="in_body"><div class="note">Escolha o nicho.</div></div></div></section>
 </main>
 
 <main id="v5" class="hide">
@@ -528,7 +529,21 @@ async function pollWait(){try{const a=await api("/api/alerts");const n=a.waiting
 setInterval(pollWait,15000);pollWait();
 
 // funil
-async function loadFunil(){const f=await api("/api/funnel?days="+$("fd").value);
+// aprender com as conversas
+async function loadInsights(){try{if(!$("in_n").options.length)$("in_n").innerHTML=niches.map(n=>`<option value="${n.id}">${esc(n.name)}</option>`).join("");const nid=$("in_n").value||(niches[0]&&niches[0].id);if(!nid)return;
+ const d=await api(`/api/insights?niche_id=${nid}&days=${$("in_d").value}`);const pc=(a,b)=>b?Math.round(a*100/b)+"%":"—";
+ let h=`<div class="kpis"><div class="kpi"><small>leads</small><b>${d.leads}</b></div><div class="kpi"><small>responderam</small><b>${pc(d.replied,d.leads)}</b></div><div class="kpi"><small>reunião, encaminhado ou ganho</small><b>${pc(d.positive,d.leads)}</b></div><div class="kpi"><small>sumiram (+72 h sem resposta)</small><b>${d.ghosted.total}</b></div></div>`;
+ if(d.ghosted.total){const b=d.ghosted.by_replies;h+=`<h3 style="margin:12px 0 4px;font-size:14px">Onde os leads somem</h3><div class="note">Respostas do lead antes de sumir: 1 → ${b["1"]} · 2 → ${b["2"]} · 3 → ${b["3"]} · 4 ou mais → ${b["4+"]}. Última mensagem do agente antes do silêncio (as mais comuns):</div>`+d.ghosted.last_agent_message.map(x=>`<div class="note">• ${x.n}× «${esc(x.text)}»</div>`).join("")}
+ h+='<h3 style="margin:12px 0 4px;font-size:14px">Objeções mais comuns</h3>';
+ h+=d.objections.length?'<table><thead><tr><th>Objeção</th><th>Leads</th><th>Continuaram</th><th>Deram resultado</th></tr></thead><tbody>'+d.objections.map(o=>`<tr><td>${esc(o.nome)}</td><td>${o.leads}</td><td>${o.continued_pct}%</td><td>${o.positive_pct}%</td></tr>`+o.examples.map(e=>`<tr><td colspan="4"><small>Cliente: «${esc(e.lead)}»<br>Resposta que funcionou: «${esc(e.reply)}»</small></td></tr>`).join("")).join("")+"</tbody></table>":'<div class="note">Sem objeções detectadas no período.</div>';
+ if(d.hours.length)h+=`<h3 style="margin:12px 0 4px;font-size:14px">Resposta por hora de envio</h3><div class="note">${d.hours.map(x=>`${x.hour}h: ${x.reply_pct}% (${x.sent})`).join(" · ")}</div>`;
+ h+='<h3 style="margin:12px 0 4px;font-size:14px">Conversas que deram certo</h3>'+(d.winners.length?'<table><tbody>'+d.winners.map(w=>`<tr><td>${esc(w.name||"—")}</td><td>${w.lead_msgs} mensagens do cliente</td><td>${esc(w.outcome||w.stage)}</td><td><button class="g" data-cs="${esc(w.phone)}">Salvar como caso de teste</button></td></tr>`).join("")+"</tbody></table>":'<div class="note">Ainda não há conversas com resultado.</div>');
+ h+=`<h3 style="margin:12px 0 4px;font-size:14px">Casos de teste deste nicho</h3><div class="note">Reproduzem as falas de clientes reais contra o agente atual. Rodam na aba Agentes, em «Avaliar o agente», marcando o caso. Telefones e e-mails são removidos.</div>`+(d.cases.length?d.cases.map(c=>`<div class="note">• ${esc(c.name)} (${esc(c.outcome||"")}) <a href="#" data-cd="${c.id}">excluir</a></div>`).join(""):'<div class="note">Nenhum caso salvo.</div>');
+ h+=`<div class="note" id="in_m"></div>`;$("in_body").innerHTML=h;
+ $("in_body").querySelectorAll("[data-cs]").forEach(b=>b.onclick=async()=>{try{await api("/api/eval/cases",{phone:b.dataset.cs});flash("in_m","Caso salvo",3000);loadInsights()}catch(e){$("in_m").textContent=e.message}});
+ $("in_body").querySelectorAll("[data-cd]").forEach(a=>a.onclick=async e=>{e.preventDefault();if(!confirm("Excluir este caso?"))return;try{await api("/api/eval/cases/"+a.dataset.cd,null,"DELETE");loadInsights()}catch(x){}})}catch(e){}}
+$("in_n").onchange=$("in_d").onchange=loadInsights;
+async function loadFunil(){loadInsights();const f=await api("/api/funnel?days="+$("fd").value);
  const mx=Math.max(1,f.steps[0].count);
  $("fsteps").innerHTML=f.steps.map((s,i)=>`<div class="fr"><span>${esc(s.label)}</span><div class="bk"><i style="width:${s.count*100/mx}%"></i></div><span><b>${s.count}</b> <small>${i?s.pct_prev+"% da etapa anterior":""}</small></span></div>`).join("")||"";
  $("fside").innerHTML=[["Conversão total",f.steps[4].pct_total+"%"],["Reuniões",f.side.reunioes],["Pediram humano",f.side.humano],["Descartados/SAIR",f.side.descartados],["Sem resposta",f.side.sem_resposta],["Perdidos",f.side.perdidos],["Aguardando corretor",f.waiting]].map(([a,b])=>`<div class="kpi"><small>${a}</small><b>${b}</b></div>`).join("");

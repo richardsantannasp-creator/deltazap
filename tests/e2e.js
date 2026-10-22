@@ -717,6 +717,13 @@ const step = async (name, fn) => {
     await page.click('#t1')
   })
 
+  await step('Aprender com as conversas: relatório no Funil e caso de teste a partir de uma conversa real', async () => {
+    await page.click('#t4'); await until(async () => (await page.innerText('#in_body')).includes('responderam'), 8000, 'relatório de insights')
+    expect((await page.innerText('#in_body')).includes('Objeções mais comuns'), 'seção de objeções')
+    const btn = page.locator('#in_body [data-cs]')
+    if (await btn.count()) { await btn.first().click(); await until(async () => (await db('SELECT COUNT(*) n FROM eval_cases'))[0].n === 1, 6000, 'caso salvo') }
+    await page.click('#t1')
+  })
   await step('Roteiros: criar um menu de boas-vindas pela tela e ver o roteiro na lista', async () => {
     await page.click('#t5'); await page.waitForSelector('#fl_new'); await page.click('#fl_new')
     await page.fill('#fl_name', 'Menu inicial'); await page.selectOption('#fl_trig', 'first')

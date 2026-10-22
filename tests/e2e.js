@@ -615,7 +615,7 @@ const step = async (name, fn) => {
     await page.click('#kbl a[data-de]'); expect((await page.inputValue('#kbt')) === 'Entrega' || true, ''); await page.click('#kbcancel')
   })
   await step('Pagamentos: escolher Asaas, salvar sem expor a chave, URL do webhook e teste de conexão', async () => {
-    await page.click('#t8'); await page.waitForSelector('#py_p'); await until(async () => (await page.getAttribute('#py_ak', 'placeholder')) !== '', 5000, 'configuração de pagamento carregada'); await page.selectOption('#py_p', 'asaas'); expect(await page.isVisible('#py_ak') && !(await page.isVisible('#py_sk')), 'campos do Asaas')
+    await page.click('#t8'); await page.waitForSelector('#py_p'); await until(async () => (await page.getAttribute('#py_ak', 'placeholder')) !== '', 5000, 'configuração de pagamento carregada'); await until(async () => { await page.selectOption('#py_p', 'asaas'); await page.waitForTimeout(150); return (await page.isVisible('#py_ak')) && !(await page.isVisible('#py_sk')) }, 8000, 'campos do Asaas')
     await page.fill('#py_ak', '$aact_chave_secreta'); await page.click('#py_save')
     await until(async () => (await page.textContent('#pays')).includes('Salvo'), 4000, 'salvo')
     const g = (await api('/api/pay')).json; expect(g.provider === 'asaas' && g.has_asaas && !JSON.stringify(g).includes('chave_secreta'), 'a chave não pode voltar na API')

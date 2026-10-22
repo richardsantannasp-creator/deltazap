@@ -368,13 +368,29 @@ def exec_tool(phone, name, inp):
         return send_material(phone, inp)                     # corrotina
     return "ferramenta desconhecida"
 
+EMOJI_LEVELS = {"nenhum", "pouco", "moderado", "bastante"}
+
+def clean_emoji(v):
+    v = str(v or "moderado").strip().lower()
+    return v if v in EMOJI_LEVELS else "moderado"
+
+def emoji_rule(level):
+    level = clean_emoji(level)
+    if level == "nenhum":
+        return "# EMOJIS\nNão use emojis nas suas mensagens. Se o lead mandar emoji, entenda o sentido (👍 = concordou, 😅 = sem jeito, 😡 = chateado) e responda ao conteúdo."
+    base = {"pouco": "Use no máximo 1 emoji em algumas mensagens (cerca de 1 a cada 3), só quando combinar com o assunto.",
+            "moderado": "Use 1 ou 2 emojis na maioria das mensagens, de forma natural (😊 👍 ✅ 📅 💬), para soar próxima e simpática, sem exagero.",
+            "bastante": "Use emojis com frequência, 2 a 3 por mensagem, em tom leve e animado, sem poluir."}[level]
+    return ("# EMOJIS\n" + base + " Espelhe o lead: se ele usa emojis, use um pouco mais; se escreve seco ou formal, reduza. Responda a emojis dele como a gente responde (👍 = concordou, 😂 = achou graça, 😡 = chateado: peça desculpas e ajude). "
+            "Nunca use emoji em assunto sério (reclamação, dinheiro em disputa, pedido para parar) nem substitua informação por emoji; um emoji nunca vai sozinho como resposta, sempre acompanhe de texto. Use só emojis de rosto simples e de objetos comuns, nunca ofensivos nem ambíguos.")
+
 def build_system(lead, niche, query=None):
     """Prompt do nicho + base de conhecimento e catálogo (em cache quando cabem inteiros) + contexto do lead."""
     kb = (niche.get("knowledge") or "").strip()
     prompt = niche["prompt"]
     if lead.get("variant") == "B" and (niche.get("prompt_b") or "").strip():      # teste A/B: este lead usa o prompt B
         prompt = niche["prompt_b"]
-    static = BASE_RULES + "\n\n" + prompt
+    static = BASE_RULES + "\n\n" + prompt + "\n\n" + emoji_rule(niche.get("emoji"))
     if kb:
         static += ("\n\n# BASE DE CONHECIMENTO (fonte de verdade: só afirme fatos que estejam aqui ou no prompt acima; "
                    "o que não estiver, diga que vai confirmar com a equipe)\n" + kb)
@@ -923,6 +939,7 @@ class NicheIn(BaseModel):
     ab_pct: int = 0
     is_default: bool = False
     copy_from: int | None = None
+    emoji: str = "moderado"      # nenhum | pouco | moderado | bastante
 
 class DispatchIn(BaseModel):
     niche_id: int
@@ -977,8 +994,8 @@ async def niche_create(b: NicheIn):
     data = (b.name.strip(), prompt, ob, tpl, lang, "" if src else b.keywords.strip(), kb, pz, dh, time.time())
     with conn() as c:
         cur = c.execute("INSERT INTO niches(name,prompt,outbound_text,template,template_lang,keywords,knowledge,personalize,doc_hint,created) VALUES(?,?,?,?,?,?,?,?,?,?)", data)
-        c.execute("UPDATE niches SET followup=?, prompt_b=? WHERE id=?", (int(src["followup"]) if src and "followup" in src else int(b.followup),
-                  (src.get("prompt_b") if src else b.prompt_b) or "", cur.lastrowid))
+        c.execute("UPDATE niches SET followup=?, prompt_b=?, emoji=? WHERE id=?", (int(src["followup"]) if src and "followup" in src else int(b.followup),
+                  (src.get("prompt_b") if src else b.prompt_b) or "", clean_emoji(src.get("emoji") if src else b.emoji), cur.lastrowid))
     if src:
         copy_sales_data(src["id"], cur.lastrowid)
     log("agente", f"nicho criado: {b.name}")
@@ -989,9 +1006,9 @@ async def niche_update(nid: int, b: NicheIn):
     if not get_niche(nid):
         raise HTTPException(404, "nicho não encontrado")
     with conn() as c:
-        c.execute("UPDATE niches SET name=?,prompt=?,outbound_text=?,template=?,template_lang=?,keywords=?,knowledge=?,personalize=?,doc_hint=?,followup=?,prompt_b=?,ab_pct=? WHERE id=?",
+        c.execute("UPDATE niches SET name=?,prompt=?,outbound_text=?,template=?,template_lang=?,keywords=?,knowledge=?,personalize=?,doc_hint=?,followup=?,prompt_b=?,ab_pct=?,emoji=? WHERE id=?",
                   (b.name.strip(), b.prompt, b.outbound_text, b.template.strip(), b.template_lang or "pt_BR", b.keywords.strip(), b.knowledge, int(b.personalize), b.doc_hint, int(b.followup),
-                   b.prompt_b, max(0, min(100, int(b.ab_pct or 0))), nid))
+                   b.prompt_b, max(0, min(100, int(b.ab_pct or 0))), clean_emoji(b.emoji), nid))
         if b.is_default:
             c.execute("INSERT OR REPLACE INTO settings(k,v) VALUES('default_niche',?)", (str(nid),))
     log("agente", f"nicho atualizado: {b.name}")
@@ -2190,7 +2207,7 @@ def migrate_v3():
         def add(table, col, ddl):
             if col not in {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}:
                 c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
-        add("niches", "prompt_b", "TEXT DEFAULT ''"); add("niches", "ab_pct", "INTEGER DEFAULT 0")
+        add("niches", "prompt_b", "TEXT DEFAULT ''"); add("niches", "ab_pct", "INTEGER DEFAULT 0"); add("niches", "emoji", "TEXT DEFAULT 'moderado'")
         add("leads", "variant", "TEXT DEFAULT 'A'")
         c.executescript("""
         CREATE TABLE IF NOT EXISTS usage(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, kind TEXT, phone TEXT DEFAULT '', niche_id INTEGER,

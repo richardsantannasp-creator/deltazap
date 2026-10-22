@@ -57,6 +57,15 @@ window.fetch=async(url,o)=>{o=o||{};const p=new URL(url,location.href).pathname,
  const lnid=q.get("line")||"main";
  const lst=x=>x.id=="main"?CONN:x.state,lme=x=>x.id=="main"?(CONN=="open"?"5521967468118":null):x.me;
  if(p=="/api/connection"){const x=LN.find(l=>l.id==lnid);if(!x)return J({detail:"Número não encontrado"},404);return J({provider:"qr",state:lst(x),qr:lst(x)=="qr"?qrsvg():null,me:lme(x),line:lnid})}
+ if(p.startsWith("/api/prospect")){
+  if(!window.PR){const nm=["Sorriso Perfeito","Clínica Bem Estar","Odonto Prime","Dental Center","Sorrir Mais","Clínica Vida","OdontoVip","Studio Dental","Família Odonto","Dra. Paula Odontologia"];window.PR=nm.map((n,i)=>({place_id:"pl"+i,name:n,phone:"(11) 9"+(8000+i*137)+"-"+(1000+i*91),e164:"+55119"+(80001000+i),whatsapp:i<7?"+55119"+(80001000+i):"",wa_origin:i<4?"Site da empresa":(i<7?"Celular do Google":""),address:"Av. Tiradentes, "+(100+i*37)+" - Guarulhos, SP",site:"https://exemplo"+i+".com.br",email:i%2?"contato@exemplo"+i+".com.br":"",instagram:"",term:"clínica odontológica",city:"Guarulhos SP",status:"Novo",notes:"",blocked:false,lead_stage:"",search_id:1}))}
+  if(p=="/api/prospect/config")return J({has_key:true,demo:false,statuses:["Novo","Na fila","Contatado","Respondeu","Sem interesse","Não contatar"],keep_days:30});
+  if(p=="/api/prospect/search")return J({detail:"Esta é a PRÉVIA com dados fictícios: a busca no Google só funciona no painel real."},400);
+  if(p.startsWith("/api/prospect/list")){const wa=/only_wa=1/.test(p);return J({rows:PR.filter(x=>!wa||x.whatsapp),searches:[{id:1,terms:"clínica odontológica",city:"Guarulhos SP",total:PR.length}]})}
+  if(p=="/api/prospect/import"){if(!b.ack)return J({detail:"Confirme a base legal e a abordagem antes de enfileirar (caixa de confirmação)"},400);let q=0,pv=0;(b.ids||[]).forEach(id=>{const x=PR.find(r=>r.place_id==id);if(!x||!x.whatsapp)return;if(x.wa_origin!="Site da empresa"&&!b.include_probable){pv++;return}x.status="Na fila";q++});return J({queued:q,suppressed:0,skipped:{provavel:pv,sem_whatsapp:0,nao_contatar:0}})}
+  if(p=="/api/prospect/export")return J({csv:"nome;whatsapp\n"+PR.map(x=>x.name+";"+x.whatsapp).join("\n")});
+  if(me=="PUT"){const x=PR.find(r=>r.place_id==decodeURIComponent(p.split("/").pop()));if(x){if(b.status!=null)x.status=b.status;if(b.notes!=null)x.notes=b.notes}return J({ok:true})}
+ }
  if(p=="/api/lines"&&me=="GET")return J({provider:"qr",max:5,unassigned:OB.filter(o=>o.status=="queued"&&!o.line).length,lines:LN.map(x=>({id:x.id,label:x.label,active:x.active,state:lst(x),me:lme(x),sent_today:x.sent,allowed_today:x.allowed,queued:OB.filter(o=>o.status=="queued"&&o.line==x.id).length,next_in:60}))});
  if(p=="/api/lines"&&me=="POST"){const lb=(b.label||"").trim();if(!lb)return J({detail:"Dê um nome ao número (ex.: Comercial 2)"},400);if(LN.length>=5)return J({detail:"Limite de 5 números (LINES_MAX no .env)"},400);
   let id=lb.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,16)||"linha",k=id,i=2;while(LN.some(l=>l.id==k)||k=="main")k=id+"-"+i++;

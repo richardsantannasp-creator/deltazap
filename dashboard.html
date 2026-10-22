@@ -108,10 +108,10 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
   <details style="margin-top:6px"><summary class="note" style="cursor:pointer">Importar vários de uma vez</summary>
    <textarea id="cp_imp" rows="4" placeholder="nome;preço;descrição;link;desconto_max;unidade&#10;Plano Ouro;197,90;Cobertura nacional;;5;mês"></textarea><div class="row"><button type="button" class="g" id="cp_impgo">Importar lista</button><span class="note" id="cp_impm"></span></div></details></details>
  <details id="kbx"><summary style="cursor:pointer;font-weight:600">Documentos da base de conhecimento <span class="note" id="kbn"></span></summary>
-  <div class="note" style="margin:6px 0">FAQ, políticas, condições, prazos, argumentos. Base pequena vai inteira para o agente; base grande entra só nos trechos que combinam com a conversa. Aceita texto colado ou arquivo .txt/.md/.csv (PDF e Word: copie e cole o texto).</div>
+  <div class="note" style="margin:6px 0">FAQ, políticas, condições, prazos, argumentos. Base pequena vai inteira para o agente; base grande entra só nos trechos que combinam com a conversa. Aceita texto colado, arquivo .txt/.md/.csv e <b>PDF</b> (tabela de preços, regras comerciais): o PDF é lido pela IA, aparece como <b>rascunho</b> para você conferir e só entra na base quando você clicar em «Adicionar documento». Word: copie e cole o texto.</div>
   <table><thead><tr><th>Documento</th><th>Tamanho</th><th></th></tr></thead><tbody id="kbl"></tbody></table>
   <label style="margin-top:6px">Título</label><input type="text" id="kbt" maxlength="120"><label>Texto</label><textarea id="kbb" rows="6"></textarea>
-  <div class="row" style="align-items:center"><button type="button" id="kbsave">Adicionar documento</button><button type="button" class="g hide" id="kbcancel">Cancelar edição</button><button type="button" class="g" id="kbfile">Enviar arquivo</button><input type="file" id="kbf" accept=".txt,.md,.csv,.json,.html,.htm" class="hide"><span class="note" id="kbm"></span></div>
+  <div class="row" style="align-items:center"><button type="button" id="kbsave">Adicionar documento</button><button type="button" class="g hide" id="kbcancel">Cancelar edição</button><button type="button" class="g" id="kbfile">Enviar arquivo</button><button type="button" class="g" id="kbpdfb">Ler PDF</button><input type="file" id="kbpdf" accept=".pdf,application/pdf" class="hide"><input type="file" id="kbf" accept=".txt,.md,.csv,.json,.html,.htm" class="hide"><span class="note" id="kbm"></span></div>
   <label style="margin-top:8px">Conferir: o que o agente enxerga para esta pergunta de um cliente</label>
   <div class="row"><input type="text" id="kbq" placeholder="ex.: qual o prazo de entrega para Campinas?"><button type="button" class="g" id="kbprev">Ver</button></div><pre class="pv" id="kbpv" style="white-space:pre-wrap;max-height:220px;overflow:auto"></pre></details>
  <details id="matx"><summary style="cursor:pointer;font-weight:600">Materiais para enviar (PDF, imagem, vídeo, áudio) <span class="note" id="matn"></span></summary>
@@ -754,6 +754,13 @@ $("kbsave").onclick=async()=>{const b={niche_id:+ni,title:$("kbt").value,body:$(
 $("kbfile").onclick=()=>$("kbf").click();
 $("kbf").onchange=async()=>{const f=$("kbf").files[0];if(!f)return;const buf=new Uint8Array(await f.arrayBuffer());let bin="";buf.forEach(b=>bin+=String.fromCharCode(b));
  try{const r=await api("/api/kb/import",{niche_id:+ni,filename:f.name,data:btoa(bin)});flash("kbm",r.ids.length+" documento(s) criado(s)",4000);loadSales()}catch(e){flash("kbm",e.message,6000)}$("kbf").value=""};
+$("kbpdfb").onclick=()=>$("kbpdf").click();
+$("kbpdf").onchange=async()=>{const f=$("kbpdf").files[0];$("kbpdf").value="";if(!f)return;if(f.size>15e6){flash("kbm","PDF maior que 15 MB",6000);return}
+ $("kbm").textContent="Lendo o PDF… (pode levar alguns minutos; cada 6 páginas é uma leitura da IA)";
+ try{const buf=new Uint8Array(await f.arrayBuffer());let bin="";for(let i=0;i<buf.length;i+=8192)bin+=String.fromCharCode.apply(null,buf.subarray(i,i+8192));
+  const r=await api("/api/kb/pdf",{niche_id:+ni,filename:f.name,data:btoa(bin)});$("kbt").value=r.title;$("kbb").value=r.body;$("kbx").open=true;$("kbb").scrollIntoView({block:"center"});
+  $("kbm").innerHTML=`PDF lido (${r.pages||"?"} página(s)). <b>Rascunho: confira os valores e clique em «Adicionar documento».</b>`+(r.warnings.length?'<br>⚠️ '+r.warnings.map(esc).join('<br>⚠️ '):'<br>✅ Todos os valores em reais do PDF aparecem na transcrição.')}
+ catch(e){$("kbm").textContent=e.message}};
 $("kbprev").onclick=async()=>{try{const r=await api("/api/kb-preview?niche_id="+ni+"&q="+encodeURIComponent($("kbq").value));$("kbpv").textContent=(r.fixo?"--- sempre enviado ---\n"+r.fixo:"(nada cadastrado)")+(r.da_conversa?"\n\n--- escolhido para esta pergunta ---\n"+r.da_conversa:"")}catch(e){$("kbpv").textContent=e.message}};
 async function evLoad(){if(!ni)return;try{if(!$("evp").children.length){const p=await api("/api/eval/personas");$("evp").innerHTML=p.personas.map(x=>`<label title="${esc(x.instrucao)}" style="display:flex;gap:6px;align-items:flex-start"><input type="checkbox" data-ev="${x.id}" ${x.padrao?"checked":""}> ${esc(x.nome)}</label>`).join("")}
  const l=await api("/api/eval?niche_id="+ni);

@@ -7281,3 +7281,84 @@ async def eval_case_del(cid: int):
     with conn() as c:
         c.execute("DELETE FROM eval_cases WHERE id=?", (cid,))
     return {"ok": True}
+
+
+# ---------- PDF para a base de conhecimento (rascunho para conferir antes de salvar) ----------
+KB_PDF_SYSTEM = """Você transcreve documentos comerciais em PDF (tabelas de preços de planos, regras comerciais, carências, coberturas) para virar texto de consulta de uma assistente de vendas.
+Regras: transcreva com FIDELIDADE TOTAL; não resuma, não interprete, não complete nem corrija nada. Copie todos os valores em reais, percentuais, prazos, faixas etárias e condições exatamente como estão. Tabelas viram tabelas em Markdown, com todas as linhas e colunas e os títulos. Mantenha os títulos e a ordem do documento. Se algo estiver ilegível ou cortado, escreva [ilegível] no lugar. Ignore apenas elementos decorativos (logotipos, rodapés repetidos, numeração de página). Responda só com a transcrição em Markdown, sem comentários seus."""
+KBPDF_MONEY_RE = re.compile(r"\d{1,3}(?:\.\d{3})*,\d{2}")
+
+def pdf_split(content, per=6):
+    """Divide o PDF em blocos de poucas páginas (leitura mais fiel); devolve (blocos, texto da camada de texto, nº de páginas)."""
+    try:
+        from pypdf import PdfReader, PdfWriter
+    except ImportError:
+        return [content], "", 0
+    rd = PdfReader(io.BytesIO(content))
+    n = len(rd.pages)
+    text = "\n".join((pg.extract_text() or "") for pg in rd.pages[:KB_PDF_MAX_PAGES])
+    out = []
+    for i in range(0, min(n, KB_PDF_MAX_PAGES), per):
+        w = PdfWriter()
+        for pg in rd.pages[i:i + per]:
+            w.add_page(pg)
+        buf = io.BytesIO(); w.write(buf); out.append(buf.getvalue())
+    return out, text, n
+
+KB_PDF_MAX_PAGES = 60
+
+class KbPdfIn(BaseModel):
+    niche_id: int
+    filename: str
+    data: str
+
+@app.post("/api/kb/pdf", dependencies=[Depends(auth)])
+async def kb_pdf(b: KbPdfIn):
+    """Lê um PDF com o Claude e devolve a transcrição como RASCUNHO. Nada é salvo: o operador confere (principalmente os valores) e adiciona o documento."""
+    _niche_or_404(b.niche_id)
+    if not b.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "Envie um arquivo .pdf")
+    try:
+        raw = _b64.b64decode(b.data, validate=False)
+    except Exception:
+        raise HTTPException(400, "Arquivo ilegível")
+    if not raw.startswith(b"%PDF"):
+        raise HTTPException(400, "Este arquivo não parece ser um PDF")
+    if len(raw) > 15_000_000:
+        raise HTTPException(400, "PDF grande demais (máximo 15 MB)")
+    try:
+        chunks, layer, pages = pdf_split(raw)
+    except Exception as e:
+        raise HTTPException(400, f"Não consegui abrir o PDF: {str(e)[:100]}")
+    if pages > KB_PDF_MAX_PAGES:
+        raise HTTPException(400, f"PDF com {pages} páginas: o máximo é {KB_PDF_MAX_PAGES}. Divida o arquivo.")
+    parts = []
+    try:
+        for ch in chunks:
+            blk = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": base64.b64encode(ch).decode()}}
+            parts.append(await claude_text([{"type": "text", "text": KB_PDF_SYSTEM}], [{"role": "user", "content": [blk, {"type": "text", "text": "Transcreva este trecho do documento."}]}],
+                                            8000, kind="leitura", niche_id=b.niche_id))
+    except BudgetExceeded as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        log("erro", f"PDF da base de conhecimento: {e}")
+        raise HTTPException(502, "Não consegui ler o PDF agora. Tente de novo em instantes.")
+    body = "\n\n".join(p_.strip() for p_ in parts if p_.strip())
+    warnings = []
+    if layer.strip():
+        found = set(KBPDF_MONEY_RE.findall(body))
+        missing = sorted({m for m in KBPDF_MONEY_RE.findall(layer)} - found)
+        if missing:
+            warnings.append("Valores que estão no PDF e NÃO apareceram na transcrição (confira): " + ", ".join("R$ " + m for m in missing[:20]))
+        extra = sorted(found - set(KBPDF_MONEY_RE.findall(layer)))
+        if extra:
+            warnings.append("Valores na transcrição que não foram achados no texto do PDF (confira): " + ", ".join("R$ " + m for m in extra[:20]))
+    else:
+        warnings.append("O PDF não tem camada de texto (parece escaneado ou imagem): não foi possível conferir os valores automaticamente. Confira todos os números com o original.")
+    if "[ilegível]" in body:
+        warnings.append("Há trechos marcados como [ilegível]: complete-os antes de salvar.")
+    if len(body) > 60000:
+        warnings.append("A transcrição passa de 60 mil caracteres: divida em dois documentos ao salvar.")
+    title = re.sub(r"\.pdf$", "", b.filename, flags=re.I)[:100]
+    log("base", f"PDF «{title}» lido: {pages or '?'} página(s), {len(body)} caracteres (rascunho)")
+    return {"title": title, "body": body, "pages": pages, "warnings": warnings}

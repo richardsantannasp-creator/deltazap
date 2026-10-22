@@ -20,6 +20,7 @@ def _default_lead(system, msgs):
     return f"quero saber mais ({n})"
 EVALSIM = {"lead": _default_lead, "judge_raw": "", "judge_fail": 0}
 AGENT_HOOK = {"fn": None}
+PDFSIM = {"fn": lambda k: "# Tabela\n| Plano | Valor |\n|---|---|\n| Ouro | R$ 1.234,56 |"}
 SUPA = {"objects": {}, "calls": [], "fail": 0, "badkey": 0, "nobucket": 0, "public": False}
 GCAL = {"calls": [], "busy": [], "events": {}, "n": 0, "pub": None, "token_fail": 0, "forbidden": 0, "tokens": 0, "fail_create": 0}
 MEDIA = {"sent": [], "graph": [], "window": 0, "fail": 0}
@@ -269,6 +270,9 @@ class _Msgs:
             CALLS.append({"kind": "juiz", "tools": 0, "system": system, "user": last})
             if EVALSIM["judge_fail"]: raise RuntimeError("juiz fora do ar")
             return _text(EVALSIM["judge_raw"] or json.dumps({"precisao": 4, "qualificacao": 4, "tom": 5, "conducao": 4, "fechamento": 3, "violacoes": [], "resumo": "bom atendimento"}))
+        if "Você transcreve documentos" in system:                         # PDF da base de conhecimento
+            CALLS.append({"kind": "kbpdf", "tools": 0, "system": system})
+            return _text(PDFSIM["fn"](k))
         CALLS.append({"kind": "leitura" if "Você lê arquivos" in system else "abertura" if "PRIMEIRA mensagem" in system
                       else "sugestao" if "SUGERINDO" in system else "agente", "tools": len(k.get("tools") or []), "system": system})
         if "Você lê arquivos" in system: return _text("Notificação de Penalidade por excesso de velocidade (radar), São Paulo/SP. Prazo para recurso: 16/10.")

@@ -9,3 +9,5 @@ openpyxl
 tzdata
 # Google Agenda (assinatura RS256 da conta de serviço)
 cryptography
+# Leitura de PDF na base de conhecimento (divide o PDF em blocos)
+pypdf

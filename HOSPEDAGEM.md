@@ -49,3 +49,13 @@ Substitua os arquivos (`server.py`, `dashboard.html`...) e rode `docker compose 
 
 ## Sem Docker (alternativa)
 No servidor: `pip install -r requirements.txt`, `uvicorn server:app --host 127.0.0.1 --port 8000` e, na pasta `gateway`, `npm install && npm start`. Rode ambos como serviço (systemd) e coloque um Nginx ou Caddy na frente para o HTTPS.
+
+## Atualização automática (Docker)
+
+Uma vez, no servidor:
+
+    cd /opt/sdr && sudo ./instalar-atualizacao-automatica.sh
+
+Todo dia às 04:15 o sistema confere o GitHub; se há versão nova, copia o banco, atualiza, reconstrói e confere o `/health`
+por dentro do container. Se não subir, volta sozinho à versão anterior. Sem versão nova, não faz nada.
+Log: `tail -f /var/log/sdr-atualizacao.log` · Testar agora: `cd /opt/sdr && ./atualizar-docker.sh` · Desligar: `sudo ./instalar-atualizacao-automatica.sh --remover`.

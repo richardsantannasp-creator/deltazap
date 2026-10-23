@@ -60,6 +60,16 @@ async def main():
     res2 = await S.prospect_import(S.ProspectImportIn(ids=[prov[0]["place_id"]], niche_id=1, ack=True, include_probable=True), harness.BackgroundTasks())
     check("com «incluir provável» entra", res2["queued"] == 1, res2)
     check("só provável sem a opção: erro claro", await expect(S.prospect_import(S.ProspectImportIn(ids=[prov[1]["place_id"]], niche_id=1, ack=True), harness.BackgroundTasks()), "WhatsApp confirmado"))
+    ph0 = S.norm_phone(conf[0]["whatsapp"])
+    S.upsert_lead(ph0, "A", niche_id=1)
+    with S.conn() as c:
+        c.execute("INSERT INTO messages(phone,role,text,ts) VALUES(?,?,?,?)", (ph0, "lead", "oi", time.time() + 5))
+        c.execute("UPDATE outbox SET status='sent', sent_at=? WHERE phone=?", (time.time(), ph0))
+        c.execute("UPDATE leads SET stage='qualificado' WHERE phone=?", (ph0,))
+    fu = await S.prospect_funnel()
+    tot = fu["total"]
+    check("funil: achadas, enfileiradas, enviadas, responderam e qualificadas", tot["found"] > 50 and tot["queued"] >= 5 and tot["sent"] >= 1 and tot["replied"] >= 1 and tot["qualified"] >= 1 and tot["calls"] > 0, tot)
+    check("funil: agrupa por nicho e cidade com % de resposta", fu["rows"][0]["term"] == "dentista" and fu["rows"][0]["reply_pct"] > 0, fu["rows"][:1])
     ex = await S.prospect_export(S.ProspectExportIn(ids=[x["place_id"] for x in rows]))
     check("exportação não leva bloqueados", blocked["whatsapp"] not in ex["csv"] and conf[2]["whatsapp"] in ex["csv"])
     # purge: o que não virou fila some depois de 30 dias

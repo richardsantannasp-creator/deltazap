@@ -7641,3 +7641,41 @@ async def prospect_export(b: ProspectExportIn):
         if not r["blocked"]:
             w.writerow([csv_safe(r["name"]), r["whatsapp"], r["wa_origin"], r["phone"], csv_safe(r["email"] or ""), r["instagram"] or "", csv_safe(r["address"] or ""), r["site"] or "", csv_safe(r["term"] or ""), csv_safe(r["city"] or ""), r["status"]])
     return {"csv": "﻿" + out.getvalue()}
+
+@app.get("/api/prospect/funnel", dependencies=[Depends(auth)])
+async def prospect_funnel():
+    """Do achado no Google até a reunião, por nicho e cidade: onde a prospecção compensa e onde não."""
+    with conn() as c:
+        P = [dict(r) for r in c.execute("SELECT place_id,whatsapp,wa_origin,term,city,queued_at FROM prospects")]
+        leads = {r["phone"]: dict(r) for r in c.execute("SELECT phone,stage,meeting FROM leads WHERE test=0")}
+        sent = {r["phone"]: r["t"] for r in c.execute("SELECT phone,MIN(sent_at) t FROM outbox WHERE status='sent' GROUP BY phone")}
+        replied = {r["phone"] for r in c.execute("SELECT DISTINCT m.phone FROM messages m WHERE m.role='lead'")}
+        calls = c.execute("SELECT COALESCE(SUM(calls),0) n FROM prospect_searches").fetchone()["n"]
+    groups = {}
+    for p in P:
+        g = groups.setdefault((p["term"] or "", p["city"] or ""), dict(term=p["term"] or "", city=p["city"] or "", found=0, with_wa=0, confirmed=0, queued=0, sent=0, replied=0, qualified=0, meetings=0, optout=0))
+        g["found"] += 1
+        if not p["whatsapp"]:
+            continue
+        g["with_wa"] += 1
+        g["confirmed"] += p["wa_origin"] == "Site da empresa"
+        ph = norm_phone(p["whatsapp"]) or ""
+        if not p["queued_at"] or ph not in leads and ph not in sent:
+            g["queued"] += bool(p["queued_at"])
+            continue
+        g["queued"] += 1
+        l = leads.get(ph, {})
+        if ph in sent:
+            g["sent"] += 1
+            g["replied"] += ph in replied
+        g["qualified"] += l.get("stage") in ("qualificado", "encaminhado", "reuniao_agendada", "humano")
+        g["meetings"] += bool(l.get("meeting")) or l.get("stage") == "reuniao_agendada"
+        g["optout"] += l.get("stage") == "descartado"
+    rows = sorted(groups.values(), key=lambda g: -g["found"])
+    for g in rows:
+        g["reply_pct"] = round(g["replied"] * 100 / g["sent"], 1) if g["sent"] else 0
+    tot = {k: sum(g[k] for g in rows) for k in ("found", "with_wa", "confirmed", "queued", "sent", "replied", "qualified", "meetings", "optout")}
+    tot["reply_pct"] = round(tot["replied"] * 100 / tot["sent"], 1) if tot["sent"] else 0
+    tot["calls"] = calls
+    tot["calls_per_reply"] = round(calls / tot["replied"], 1) if tot["replied"] else None
+    return {"rows": rows, "total": tot}

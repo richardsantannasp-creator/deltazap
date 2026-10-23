@@ -397,6 +397,10 @@ def build_system(lead, niche, query=None):
     ctx = (f"Lead: {lead['name'] or 'sem nome'} ({lead['company'] or 'empresa não informada'}). "
            f"Nicho: {niche['name']}. Origem: {ORIGIN_TXT.get(lead['origin'], lead['origin'])}. Estágio: {lead['stage']}. Já sabemos: {lead['bant']}.")
     try:
+        ctx += memory_context(lead["phone"])
+    except Exception as e:
+        log("erro", f"memória: {e}")
+    try:
         extra_static, extra_dyn = sales_context(lead, niche, query)
     except Exception as e:                                   # a base de conhecimento nunca derruba o atendimento
         log("erro", f"base de conhecimento: {e}")
@@ -608,6 +612,7 @@ async def handle_incoming(phone, name, text, wamid=None, send=True, line=None):
             await reply_to(phone, reply, send=send)
             if get_lead(phone)["stage"] == "novo":
                 set_lead(phone, stage="contatado")
+            await memory_update(phone)          # depois de responder: o lead não espera por isso
 
 # ---------- disparo por nicho ----------
 def norm_phone(s):
@@ -1258,8 +1263,11 @@ async def leads():
         rows = c.execute("SELECT l.*, n.name AS niche, a.name AS agent_name FROM leads l LEFT JOIN niches n ON n.id=l.niche_id LEFT JOIN agents a ON a.id=l.agent_id ORDER BY l.created DESC").fetchall()
     out = []
     tg = lead_tag_map()
+    with conn() as c:
+        mem = {r["phone"]: r["summary"] for r in c.execute("SELECT phone,summary FROM lead_memory")}
     for r in rows:
         d = dict(r)
+        d["memory"] = mem.get(d["phone"], "")
         dt = parse_meeting(d.get("meeting") or "")
         d["meeting_start"] = dt.strftime("%Y-%m-%dT%H:%M") if dt else None
         d["tags"] = tg.get(d["phone"], [])
@@ -3375,6 +3383,7 @@ async def lead_export(phone: str):
                 "etapas": q("SELECT stage,ts FROM stage_events WHERE phone=? ORDER BY id"),
                 "avisos_enviados_a_equipe": q("SELECT ts,kind,status FROM alerts WHERE phone=?"),
                 "crm_externo": q("SELECT system,person_id,deal_id FROM crm_refs WHERE phone=?"),
+                "memoria_resumo": q("SELECT summary,ts FROM lead_memory WHERE phone=?"),
                 "foto_de_perfil_guardada": bool(c.execute("SELECT 1 FROM avatars WHERE who=? AND data IS NOT NULL", (phone,)).fetchone()),
                 "na_lista_de_supressao": is_suppressed(phone)}
     lgpd_record("exportar", "dados de um contato exportados", ref=phash(phone)[:10])
@@ -3391,7 +3400,7 @@ def erase_lead(phone, keep_suppression=None):
     with conn() as c:
         had_crm = bool(c.execute("SELECT 1 FROM crm_refs WHERE phone=?", (phone,)).fetchone())
         files = [r["name"] for r in c.execute("SELECT name FROM files WHERE phone=?", (phone,))]
-        for t in ("messages", "files", "outbox", "stage_events", "alerts", "crm_refs", "crm_log", "leads"):
+        for t in ("messages", "files", "outbox", "stage_events", "alerts", "crm_refs", "crm_log", "lead_memory", "leads"):
             c.execute(f"DELETE FROM {t} WHERE phone=?", (phone,))
         c.execute("DELETE FROM avatars WHERE who=?", (phone,))
         c.execute("DELETE FROM material_sends WHERE phone=?", (phone,)); c.execute("DELETE FROM notes WHERE phone=?", (phone,)); c.execute("DELETE FROM lead_tags WHERE phone=?", (phone,))            # a foto também é dado pessoal
@@ -6387,7 +6396,7 @@ migrate_v17()
 AUDIT_SKIP = re.compile(r"^/(webhook|gateway/|pay/webhook/)|^/api/(push|simulate|simulate-file|contacts/parse|test-lead)\b|/suggest$|^/api/agent/status$")
 AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale; "T" indica onde está o alvo (grupo 1).
     ("POST", r"^/api/niches$", "Criou agente/nicho"), ("PUT", r"^/api/niches/(\d+)$", "Alterou agente/nicho"), ("DELETE", r"^/api/niches/(\d+)$", "Excluiu agente/nicho"),
-    ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
+    ("DELETE", r"^/api/leads/([^/]+)/memory$", "Apagou a memória do lead"), ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
     ("POST", r"^/api/dispatch$", "Criou disparo"), ("PUT", r"^/api/pacing$", "Alterou ritmo de envio"), ("POST", r"^/api/outbox/pause$", "Pausou/retomou a fila de envio"), ("POST", r"^/api/outbox/clear$", "Limpou a fila de envio"),
     ("POST", r"^/api/connection/pair$", "Gerou código de conexão do WhatsApp"), ("POST", r"^/api/connection/logout$", "Desconectou o WhatsApp"),
     ("POST", r"^/api/lines$", "Adicionou número de WhatsApp"), ("PUT", r"^/api/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/lines/([\w-]+)$", "Removeu número de WhatsApp"),
@@ -7815,3 +7824,69 @@ async def review_put(b: ReviewIn):
     set_setting("review_on", "1" if b.enabled else "0")
     log("agente", "revisão antes de enviar " + ("ligada" if b.enabled else "desligada"))
     return {"ok": True, "enabled": b.enabled}
+
+
+# ======================================================================
+# v25: memória por lead — resumo do que ficou fora da janela das últimas 30 mensagens
+# ======================================================================
+MEMORY_WINDOW = 30          # o histórico enviado ao Claude (history) tem as últimas 30 mensagens
+MEMORY_MIN_NEW = 8          # só resume quando há pelo menos isto de mensagens novas fora da janela
+MEMORY_SYSTEM = ("RESUMO DE MEMÓRIA. Você mantém a memória de uma conversa de WhatsApp entre uma SDR e um lead. Receba o resumo atual (pode estar vazio) e as mensagens mais antigas que saíram da janela, "
+                 "e devolva o resumo ATUALIZADO em português, até 900 caracteres, em tópicos curtos: o que o lead quer, situação dele, objeções, o que foi combinado ou prometido, pendências, jeito de falar. "
+                 "Regras: só fatos que estão na conversa; NÃO inclua doenças, dados de saúde, documentos, CPF, endereço completo, telefone, e-mail ou dados de pagamento; não invente. Devolva só o resumo.")
+
+def migrate_v25():
+    with conn() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS lead_memory(phone TEXT PRIMARY KEY, summary TEXT DEFAULT '', upto_id INTEGER DEFAULT 0, ts REAL)")
+migrate_v25()
+
+def memory_context(phone):
+    """Texto que entra no contexto do lead: resumo das conversas antigas e há quanto tempo ele escreveu."""
+    out = ""
+    with conn() as c:
+        r = c.execute("SELECT summary FROM lead_memory WHERE phone=?", (phone,)).fetchone()
+        last = c.execute("SELECT MAX(ts) t FROM messages WHERE phone=? AND role='lead'", (phone,)).fetchone()["t"]
+        prev = c.execute("SELECT ts FROM messages WHERE phone=? AND role='lead' ORDER BY id DESC LIMIT 1 OFFSET 1", (phone,)).fetchone()
+    if prev and (last or 0) - prev["ts"] > 2 * 86400:
+        out += f" O lead voltou a escrever depois de {int(((last or 0) - prev['ts']) / 86400)} dias: retome de onde pararam, sem recomeçar do zero."
+    if r and r["summary"].strip():
+        out += "\n\n# MEMÓRIA DESTE LEAD (resumo da conversa antiga; use para não repetir perguntas)\n" + r["summary"].strip()
+    return out
+
+async def memory_update(phone):
+    if phone in EVAL_PHONES:
+        return
+    try:
+        with conn() as c:
+            ids = [r["id"] for r in c.execute("SELECT id FROM messages WHERE phone=? ORDER BY id DESC LIMIT ?", (phone, MEMORY_WINDOW))]
+            if len(ids) < MEMORY_WINDOW:
+                return
+            edge = ids[-1]                                   # primeira mensagem ainda dentro da janela
+            mem = c.execute("SELECT summary,upto_id FROM lead_memory WHERE phone=?", (phone,)).fetchone()
+            upto = mem["upto_id"] if mem else 0
+            old = c.execute("SELECT id,role,text FROM messages WHERE phone=? AND id>? AND id<? ORDER BY id", (phone, upto, edge)).fetchall()
+        if len(old) < MEMORY_MIN_NEW:
+            return
+        lead = get_lead(phone)
+        txt = "\n".join(("Lead: " if m["role"] == "lead" else "SDR: ") + redact_text(m["text"] or "")[:600] for m in old)
+        user = f"RESUMO ATUAL:\n{(mem['summary'] if mem else '') or '(vazio)'}\n\nMENSAGENS MAIS ANTIGAS:\n{txt}"
+        r = await claude_create("memoria", phone, lead["niche_id"] if lead else None, max_tokens=500, system=MEMORY_SYSTEM, messages=[{"role": "user", "content": user}])
+        summary = redact_text("".join(b.text for b in r.content if b.type == "text").strip())[:1200]
+        if summary:
+            with conn() as c:
+                c.execute("INSERT OR REPLACE INTO lead_memory(phone,summary,upto_id,ts) VALUES(?,?,?,?)", (phone, summary, old[-1]["id"], time.time()))
+            log("memória", f"{phone}: resumo atualizado ({len(old)} mensagens antigas)")
+    except Exception as e:
+        log("erro", f"memória: {e}")
+
+@app.get("/api/leads/{phone}/memory", dependencies=[Depends(auth)])
+async def memory_get(phone: str):
+    with conn() as c:
+        r = c.execute("SELECT summary,ts FROM lead_memory WHERE phone=?", (phone,)).fetchone()
+    return {"summary": r["summary"] if r else "", "ts": r["ts"] if r else None}
+
+@app.delete("/api/leads/{phone}/memory", dependencies=[Depends(auth)])
+async def memory_clear(phone: str):
+    with conn() as c:
+        c.execute("DELETE FROM lead_memory WHERE phone=?", (phone,))
+    return {"ok": True}

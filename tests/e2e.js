@@ -271,6 +271,8 @@ const step = async (name, fn) => {
   })
   await step('fotos de perfil: cliente e operador aparecem na lista, no cabeçalho e nas mensagens (iniciais quando não há foto)', async () => {
     await api('/__test/photo', { body: { have: ['5521911110002', 'me'] } })
+    await db('DELETE FROM avatars')                                            // um tique anterior pode ter guardado "sem foto" (no servidor e na página) antes de a foto existir
+    await page.evaluate(() => { for (const k of Object.keys(AV)) delete AV[k] })
     await page.click('#t1'); await page.waitForSelector('#leads .item')
     await page.click('#leads .item[data-p="5521911110002"]')
     await until(async () => (await page.textContent('#ct')).includes('Carlos'), 6000, 'conversa do Carlos')

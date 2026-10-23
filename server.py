@@ -406,6 +406,10 @@ def build_system(lead, niche, query=None):
         log("erro", f"base de conhecimento: {e}")
         extra_static, extra_dyn = "", ""
     static += extra_static
+    try:
+        static += playbook_context(niche["id"])
+    except Exception as e:
+        log("erro", f"playbook: {e}")
     if gcal_ready():
         static += ("\n\n# AGENDA\nVocê tem acesso à agenda da equipe. Antes de propor horários, chame consultar_horarios e ofereça só horários que ela devolver. "
                    "Use agendar_reuniao apenas com um desses horários confirmados pelo lead; se ela disser que o horário está indisponível, não confirme e ofereça outro.")
@@ -5141,6 +5145,8 @@ async def product_import(b: ProductImportIn):
 
 def copy_sales_data(src, dst):
     with conn() as c:
+        for r in c.execute("SELECT key,guidance FROM playbook WHERE niche_id=?", (src,)).fetchall():
+            c.execute("INSERT OR REPLACE INTO playbook(niche_id,key,guidance) VALUES(?,?,?)", (dst, r["key"], r["guidance"]))
         for r in c.execute("SELECT title,body FROM kb_docs WHERE niche_id=?", (src,)).fetchall():
             c.execute("INSERT INTO kb_docs(niche_id,title,body,ts) VALUES(?,?,?,?)", (dst, r["title"], r["body"], time.time()))
         for r in c.execute("SELECT * FROM products WHERE niche_id=?", (src,)).fetchall():
@@ -6396,7 +6402,7 @@ migrate_v17()
 AUDIT_SKIP = re.compile(r"^/(webhook|gateway/|pay/webhook/)|^/api/(push|simulate|simulate-file|contacts/parse|test-lead)\b|/suggest$|^/api/agent/status$")
 AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale; "T" indica onde está o alvo (grupo 1).
     ("POST", r"^/api/niches$", "Criou agente/nicho"), ("PUT", r"^/api/niches/(\d+)$", "Alterou agente/nicho"), ("DELETE", r"^/api/niches/(\d+)$", "Excluiu agente/nicho"),
-    ("DELETE", r"^/api/leads/([^/]+)/memory$", "Apagou a memória do lead"), ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
+    ("PUT", r"^/api/playbook$", "Alterou o playbook de objeções"), ("DELETE", r"^/api/leads/([^/]+)/memory$", "Apagou a memória do lead"), ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
     ("POST", r"^/api/dispatch$", "Criou disparo"), ("PUT", r"^/api/pacing$", "Alterou ritmo de envio"), ("POST", r"^/api/outbox/pause$", "Pausou/retomou a fila de envio"), ("POST", r"^/api/outbox/clear$", "Limpou a fila de envio"),
     ("POST", r"^/api/connection/pair$", "Gerou código de conexão do WhatsApp"), ("POST", r"^/api/connection/logout$", "Desconectou o WhatsApp"),
     ("POST", r"^/api/lines$", "Adicionou número de WhatsApp"), ("PUT", r"^/api/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/lines/([\w-]+)$", "Removeu número de WhatsApp"),
@@ -7890,3 +7896,71 @@ async def memory_clear(phone: str):
     with conn() as c:
         c.execute("DELETE FROM lead_memory WHERE phone=?", (phone,))
     return {"ok": True}
+
+
+# ======================================================================
+# v26: playbook de objeções — como o agente deve tratar cada objeção, aprovado pelo dono do nicho
+# ======================================================================
+def migrate_v26():
+    with conn() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS playbook(niche_id INTEGER, key TEXT, guidance TEXT DEFAULT '', PRIMARY KEY(niche_id, key))")
+migrate_v26()
+
+PLAYBOOK_SUGGESTED = {
+    "preco": "Não discuta preço sem entender o valor: pergunte o que ele está comparando e o que mais pesa na decisão. Mostre o que está incluso. Só cite valores e descontos que existam na base; se não existir, diga que o consultor monta a melhor condição.",
+    "ja_tem": "Reconheça que ter já é bom. Pergunte o que ele mais gostaria de melhorar no que tem hoje (custo, atendimento, cobertura) e proponha apenas uma comparação sem compromisso.",
+    "sem_tempo": "Respeite o tempo: ofereça escolher um horário curto (5 minutos) ou continuar por mensagem quando ele puder. Pergunte qual momento é melhor e combine o retorno.",
+    "sem_interesse": "Aceite com educação e sem insistir. Faça no máximo UMA pergunta leve para entender o motivo e deixe a porta aberta. Se ele reafirmar, agradeça e encerre; se pedir para sair, confirme que não receberá mais mensagens.",
+    "mandar_info": "Envie um resumo curto e direto (ou o material do nicho) e peça uma única informação para personalizar. Combine quando você volta a falar com ele.",
+    "decisor": "Pergunte quem decide e ofereça incluir essa pessoa na conversa ou preparar um resumo simples para ele repassar. Combine o dia do retorno.",
+    "depois": "Não force. Pergunte quando faz sentido retomar e registre o combinado. Se houver prazo ou vantagem real na base, mencione uma vez, sem pressão.",
+    "confianca": "Seja transparente: diga quem você é, de qual empresa, por que está falando com ele e de onde veio o contato. Ofereça ver o site oficial ou falar com uma pessoa da equipe. Nunca peça dados sensíveis nem pagamento neste momento.",
+}
+
+def playbook_get(niche_id):
+    with conn() as c:
+        return {r["key"]: r["guidance"] for r in c.execute("SELECT key,guidance FROM playbook WHERE niche_id=?", (niche_id,))}
+
+def playbook_context(niche_id):
+    pb = playbook_get(niche_id)
+    lines = [f"- {nome}: {pb[k].strip()}" for k, nome, _ in OBJECTIONS if (pb.get(k) or "").strip()]
+    if not lines:
+        return ""
+    return ("\n\n# PLAYBOOK DE OBJEÇÕES (orientação aprovada pelo dono do negócio para quando o lead levantar a objeção; adapte com suas palavras, "
+            "uma pergunta por vez, e não afirme preço, desconto ou prazo que não esteja na base)\n" + "\n".join(lines))
+
+class PlaybookItem(BaseModel):
+    key: str
+    guidance: str = ""
+
+class PlaybookIn(BaseModel):
+    niche_id: int
+    items: list[PlaybookItem]
+
+@app.get("/api/playbook", dependencies=[Depends(auth)])
+async def playbook_api_get(niche_id: int):
+    if not get_niche(niche_id):
+        raise HTTPException(404, "nicho não encontrado")
+    pb = playbook_get(niche_id)
+    stats = {o["id"]: o for o in insights_report(niche_id, 90)["objections"]}
+    return {"items": [{"key": k, "name": nome, "guidance": pb.get(k, ""), "suggested": PLAYBOOK_SUGGESTED[k],
+                       "leads": stats.get(k, {}).get("leads", 0), "continued_pct": stats.get(k, {}).get("continued_pct", 0), "positive_pct": stats.get(k, {}).get("positive_pct", 0)}
+                      for k, nome, _ in OBJECTIONS]}
+
+@app.put("/api/playbook", dependencies=[Depends(auth)])
+async def playbook_api_put(b: PlaybookIn):
+    if not get_niche(b.niche_id):
+        raise HTTPException(404, "nicho não encontrado")
+    valid = {k for k, _, _ in OBJECTIONS}
+    n = 0
+    with conn() as c:
+        for it in b.items:
+            if it.key not in valid:
+                raise HTTPException(400, "objeção desconhecida: " + it.key[:30])
+            g = " ".join(it.guidance.split())[:700]
+            if g:
+                c.execute("INSERT OR REPLACE INTO playbook(niche_id,key,guidance) VALUES(?,?,?)", (b.niche_id, it.key, g)); n += 1
+            else:
+                c.execute("DELETE FROM playbook WHERE niche_id=? AND key=?", (b.niche_id, it.key))
+    log("agente", f"playbook de objeções do nicho {b.niche_id}: {n} orientação(ões)")
+    return {"ok": True, "active": n}

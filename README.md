@@ -57,6 +57,9 @@ O agente consulta horários livres e cria o evento de verdade em uma agenda do G
 ## Gestor de equipe (acesso próprio, número próprio, equipe própria)
 O administrador cria gestores em **Avisos > Gestores de equipe** (limites de números e de atendentes por gestor). O gestor entra em `/gestor`, conecta o WhatsApp dele, cria os atendentes dele e atende as conversas dos números dele, sem ver nada de outros. Transferências em números do gestor só vão para a equipe dele, e os números dos gestores nunca entram nos disparos do administrador. Detalhes em `GESTOR.md`.
 
+## Revisão antes de enviar
+Antes de cada resposta do agente sair, o sistema confere os números que ele citou: **valores em R$** precisam existir na base de conhecimento, no catálogo, no prompt ou na fala do lead; **percentuais** só passam se a base traz aquele número com %; **prazos** ("em 2 horas") só passam se a base traz o mesmo número e a mesma unidade. Se algo não bater, o agente reescreve; se ainda não bater, a frase é cortada ou vira "vou confirmar com a nossa equipe". Tudo fica registrado em **Funil > Revisão antes de enviar** (sem telefone completo) e dá para desligar ali. Não vale para o teste de qualidade, que mede o agente sem essa rede de segurança. Custo: só quando há correção (uma chamada extra).
+
 ## Prospecção por Google
 Veja `PROSPECCAO.md`: busca empresas no Google Places e envia pela fila do SDR, com opt-out, supressão e aquecimento.
 

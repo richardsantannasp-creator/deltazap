@@ -67,6 +67,7 @@ window.fetch=async(url,o)=>{o=o||{};const p=new URL(url,location.href).pathname,
   if(p=="/api/prospect/export")return J({csv:"nome;whatsapp\n"+PR.map(x=>x.name+";"+x.whatsapp).join("\n")});
   if(me=="PUT"){const x=PR.find(r=>r.place_id==decodeURIComponent(p.split("/").pop()));if(x){if(b.status!=null)x.status=b.status;if(b.notes!=null)x.notes=b.notes}return J({ok:true})}
  }
+ if(p=="/api/review"){if(me=="PUT")return J({ok:true,enabled:!!b.enabled});return J({enabled:true,count_30d:2,rows:[{ts:t()-4000,who:"…4567",claims:"valor: R$ 321,00",action:"reescrito",original:"O plano sai R$ 321,00 por mês."},{ts:t()-90000,who:"…1122",claims:"percentual: 35%",action:"frase removida",original:"Temos 35% de desconto hoje!"}]})}
  if(p=="/api/lines"&&me=="GET")return J({provider:"qr",max:5,unassigned:OB.filter(o=>o.status=="queued"&&!o.line).length,lines:LN.map(x=>({id:x.id,label:x.label,active:x.active,state:lst(x),me:lme(x),sent_today:x.sent,allowed_today:x.allowed,queued:OB.filter(o=>o.status=="queued"&&o.line==x.id).length,next_in:60}))});
  if(p=="/api/lines"&&me=="POST"){const lb=(b.label||"").trim();if(!lb)return J({detail:"Dê um nome ao número (ex.: Comercial 2)"},400);if(LN.length>=5)return J({detail:"Limite de 5 números (LINES_MAX no .env)"},400);
   let id=lb.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,16)||"linha",k=id,i=2;while(LN.some(l=>l.id==k)||k=="main")k=id+"-"+i++;

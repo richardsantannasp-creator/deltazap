@@ -473,7 +473,7 @@ async def run_agent(phone):
                     results.append({"type": "tool_result", "tool_use_id": b.id, "content": out})
             messages.append({"role": "user", "content": results})
             continue
-        return "".join(b.text for b in r.content if b.type == "text").strip()
+        return await review_reply(phone, lead, niche, system, messages, "".join(b.text for b in r.content if b.type == "text").strip())
     return ""
 
 # ---------- WhatsApp ----------
@@ -6387,7 +6387,7 @@ migrate_v17()
 AUDIT_SKIP = re.compile(r"^/(webhook|gateway/|pay/webhook/)|^/api/(push|simulate|simulate-file|contacts/parse|test-lead)\b|/suggest$|^/api/agent/status$")
 AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale; "T" indica onde está o alvo (grupo 1).
     ("POST", r"^/api/niches$", "Criou agente/nicho"), ("PUT", r"^/api/niches/(\d+)$", "Alterou agente/nicho"), ("DELETE", r"^/api/niches/(\d+)$", "Excluiu agente/nicho"),
-    ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
+    ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
     ("POST", r"^/api/dispatch$", "Criou disparo"), ("PUT", r"^/api/pacing$", "Alterou ritmo de envio"), ("POST", r"^/api/outbox/pause$", "Pausou/retomou a fila de envio"), ("POST", r"^/api/outbox/clear$", "Limpou a fila de envio"),
     ("POST", r"^/api/connection/pair$", "Gerou código de conexão do WhatsApp"), ("POST", r"^/api/connection/logout$", "Desconectou o WhatsApp"),
     ("POST", r"^/api/lines$", "Adicionou número de WhatsApp"), ("PUT", r"^/api/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/lines/([\w-]+)$", "Removeu número de WhatsApp"),
@@ -7679,3 +7679,139 @@ async def prospect_funnel():
     tot["calls"] = calls
     tot["calls_per_reply"] = round(calls / tot["replied"], 1) if tot["replied"] else None
     return {"rows": rows, "total": tot}
+
+
+# ======================================================================
+# v24: revisão antes de enviar — valores, percentuais e prazos que o agente cita precisam existir na base
+# ======================================================================
+def migrate_v24():
+    with conn() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS review_log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, who TEXT, niche_id INTEGER, claims TEXT, action TEXT, original TEXT)")
+migrate_v24()
+
+REVIEW_NUM = re.compile(r"\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?")
+REVIEW_CLAIMS = [
+    ("valor", re.compile(r"R\$\s*(" + REVIEW_NUM.pattern + r")|(" + REVIEW_NUM.pattern + r")\s*reais", re.I)),
+    ("percentual", re.compile(r"(" + REVIEW_NUM.pattern + r")\s*(?:%|por\s*cento)", re.I)),
+    ("prazo", re.compile(r"(?:em\s+at[eé]|em|at[eé]|dentro\s+de|prazo\s+de)\s+(\d+)\s*(?:horas?|h\b|dias?|semanas?|minutos?)", re.I)),
+]
+REVIEW_NOTE = ("[REVISÃO INTERNA — não mencione esta nota ao lead] Sua resposta citou {lista}, que não consta na base de conhecimento, no catálogo nem na conversa. "
+               "Reescreva a mesma resposta SEM esses números: use só valores, descontos e prazos oficiais; se a informação não existir, diga que vai confirmar com a equipe.")
+REVIEW_SAFE = "Vou confirmar esse ponto com a nossa equipe e já te retorno por aqui."
+
+def review_on():
+    return get_setting("review_on", "1") != "0"
+
+def _review_num(t):
+    t = t.strip()
+    if "," in t and "." in t:
+        t = t.replace(".", "").replace(",", ".")
+    elif "," in t:
+        t = t.replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(?:\.\d{3})+", t):
+        t = t.replace(".", "")
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+def review_numbers(text):
+    return {v for v in (_review_num(m) for m in REVIEW_NUM.findall(text or "")) if v is not None}
+
+REVIEW_UNIT = re.compile(r"(\d+)\s*(h\b|hora|dia|semana|minuto)", re.I)
+
+def _unit_root(u):
+    return "hora" if u.lower().startswith("h") else u.lower()[:4]
+
+def review_unverified(text, allowed):
+    """Lista (tipo, texto citado) das afirmações com número que não existem na fonte certa: valores em qualquer número da base,
+    percentuais só se a base traz o número com %, prazos só se a base traz o mesmo número com a mesma unidade."""
+    out = []
+    for kind, rx in REVIEW_CLAIMS:
+        for m in rx.finditer(text or ""):
+            raw = next((g for g in m.groups() if g), "")
+            if kind == "prazo":
+                u = REVIEW_UNIT.search(m.group(0))
+                ok = bool(u) and (float(raw), _unit_root(u.group(2))) in allowed["time"]
+            else:
+                v = _review_num(raw)
+                pool = allowed["pct"] if kind == "percentual" else allowed["nums"]
+                ok = v is None or any(abs(v - a) < 0.005 for a in pool)
+            if not ok:
+                out.append((kind, m.group(0).strip()))
+    return out
+
+def review_allowed(lead, niche, messages):
+    parts = [niche.get("prompt") or "", niche.get("outbound_text") or "", niche.get("knowledge") or "", lead.get("name") or "", lead.get("company") or "", lead.get("bant") or ""]
+    nums, disc = set(), set()
+    with conn() as c:
+        parts += [r["body"] for r in c.execute("SELECT body FROM kb_docs WHERE niche_id=?", (niche["id"],))]
+        for r in c.execute("SELECT name,description,price_cents,max_discount_pct,unit FROM products WHERE niche_id=?", (niche["id"],)):
+            parts += [r["name"] or "", r["description"] or ""]
+            nums.add((r["price_cents"] or 0) / 100)
+            disc.add(float(r["max_discount_pct"] or 0))
+    for m in messages:
+        cont = m.get("content")
+        if isinstance(cont, str):
+            parts.append(cont)
+        elif isinstance(cont, list):
+            parts += [str(x.get("content", "")) if isinstance(x, dict) else "" for x in cont]
+    text = "\n".join(parts)
+    nums |= review_numbers(text)
+    pct = {v for v in (_review_num(m) for m in re.findall(r"(" + REVIEW_NUM.pattern + r")\s*(?:%|por\s*cento)", text, re.I)) if v is not None} | {float(x) for x in disc}
+    tm = {(float(a), _unit_root(b)) for a, b in REVIEW_UNIT.findall(text)}
+    return {"nums": nums, "pct": pct, "time": tm}
+
+def review_strip(text, bad):
+    """Tira as frases que carregam afirmações não verificadas; devolve o resto (ou vazio)."""
+    frases = re.split(r"(?<=[.!?])\s+|\n+", text)
+    ruins = [b[1] for b in bad]
+    keep = [f for f in frases if f.strip() and not any(r in f for r in ruins)]
+    return " ".join(keep).strip()
+
+def _review_save(phone, niche_id, bad, action, original):
+    with conn() as c:
+        c.execute("INSERT INTO review_log(ts,who,niche_id,claims,action,original) VALUES(?,?,?,?,?,?)", (time.time(), "…" + re.sub(r"\D", "", phone)[-4:], niche_id, "; ".join(f"{k}: {t}" for k, t in bad)[:300], action, original[:500]))
+
+async def review_reply(phone, lead, niche, system, messages, text):
+    if not text or not review_on() or phone in EVAL_PHONES:
+        return text
+    allowed = review_allowed(lead, niche, messages)
+    bad = review_unverified(text, allowed)
+    if not bad:
+        return text
+    lista = ", ".join(t for _, t in bad[:5])
+    log("revisão", f"{phone}: citou {lista} sem base; pedindo nova resposta")
+    try:
+        r = await claude_create("agente", phone, niche["id"], max_tokens=600, system=system,
+                                messages=messages + [{"role": "assistant", "content": text}, {"role": "user", "content": REVIEW_NOTE.format(lista=lista)}])
+        new = "".join(b.text for b in r.content if b.type == "text").strip()
+    except Exception as e:
+        log("erro", f"revisão: {e}")
+        new = ""
+    bad2 = review_unverified(new, allowed) if new else bad
+    if new and not bad2:
+        _review_save(phone, niche["id"], bad, "reescrito", text)
+        return new
+    cut = review_strip(new or text, bad2)
+    if cut:
+        _review_save(phone, niche["id"], bad2, "frase removida", text)
+        return cut
+    _review_save(phone, niche["id"], bad2, "resposta segura", text)
+    return REVIEW_SAFE
+
+@app.get("/api/review", dependencies=[Depends(auth)])
+async def review_get():
+    with conn() as c:
+        rows = [dict(r) for r in c.execute("SELECT ts,who,claims,action,original FROM review_log ORDER BY id DESC LIMIT 30")]
+        n30 = c.execute("SELECT COUNT(*) n FROM review_log WHERE ts>?", (time.time() - 30 * 86400,)).fetchone()["n"]
+    return {"enabled": review_on(), "rows": rows, "count_30d": n30}
+
+class ReviewIn(BaseModel):
+    enabled: bool
+
+@app.put("/api/review", dependencies=[Depends(auth)])
+async def review_put(b: ReviewIn):
+    set_setting("review_on", "1" if b.enabled else "0")
+    log("agente", "revisão antes de enviar " + ("ligada" if b.enabled else "desligada"))
+    return {"ok": True, "enabled": b.enabled}

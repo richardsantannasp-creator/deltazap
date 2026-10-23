@@ -391,7 +391,11 @@ def build_system(lead, niche, query=None):
     prompt = niche["prompt"]
     if lead.get("variant") == "B" and (niche.get("prompt_b") or "").strip():      # teste A/B: este lead usa o prompt B
         prompt = niche["prompt_b"]
+    persona = agent_persona(niche, lead_line(lead["phone"]))
+    prompt = fill_agent(prompt, persona)
     static = BASE_RULES + "\n\n" + prompt + "\n\n" + emoji_rule(niche.get("emoji"))
+    if persona:
+        static += f"\n\n# SEU NOME\nNesta conversa você se chama {persona}. Apresente-se sempre com este nome; se perguntarem, você é a assistente virtual da empresa."
     if kb:
         static += ("\n\n# BASE DE CONHECIMENTO (fonte de verdade: só afirme fatos que estejam aqui ou no prompt acima; "
                    "o que não estiver, diga que vai confirmar com a equipe)\n" + kb)
@@ -671,7 +675,11 @@ async def dispatch_one(niche, phone, name, company, context="", line=None, conse
     fn = first_name(name)
     use_template = PROVIDER == "official" and niche["template"]
     vidx, base = (0, niche["outbound_text"]) if use_template else pick_opening(niche, phone)
-    text = base.replace("{nome}", fn).replace("{empresa}", company or "")
+    persona = agent_persona(niche, line or lead_line(phone))
+    if "{agente}" in base and not persona and not use_template:
+        log("aviso", f"{phone}: não enviado, a abertura usa {{agente}} mas o nome do agente não foi definido (nicho ou número)")
+        return "defina o nome do agente (nicho ou número)"
+    text = fill_agent(base, persona).replace("{nome}", fn).replace("{empresa}", company or "")
     if "sair" not in text.lower():
         text += " Se não quiser receber mensagens, responda SAIR."
     set_lead(phone, opening_variant=vidx)
@@ -956,6 +964,7 @@ class NicheIn(BaseModel):
     is_default: bool = False
     copy_from: int | None = None
     emoji: str = "moderado"      # nenhum | pouco | moderado | bastante
+    agent_name: str = ""         # nome do agente neste nicho: preenche {agente} nas aberturas e no prompt
     outbound_variants: str = ""  # outras aberturas do 1º contato, separadas por uma linha com ---
 
 class DispatchIn(BaseModel):
@@ -1011,8 +1020,8 @@ async def niche_create(b: NicheIn):
     data = (b.name.strip(), prompt, ob, tpl, lang, "" if src else b.keywords.strip(), kb, pz, dh, time.time())
     with conn() as c:
         cur = c.execute("INSERT INTO niches(name,prompt,outbound_text,template,template_lang,keywords,knowledge,personalize,doc_hint,created) VALUES(?,?,?,?,?,?,?,?,?,?)", data)
-        c.execute("UPDATE niches SET followup=?, prompt_b=?, emoji=?, outbound_variants=? WHERE id=?", (int(src["followup"]) if src and "followup" in src else int(b.followup),
-                  (src.get("prompt_b") if src else b.prompt_b) or "", clean_emoji(src.get("emoji") if src else b.emoji), clean_variants(src.get("outbound_variants") if src else b.outbound_variants), cur.lastrowid))
+        c.execute("UPDATE niches SET followup=?, prompt_b=?, emoji=?, outbound_variants=?, agent_name=? WHERE id=?", (int(src["followup"]) if src and "followup" in src else int(b.followup),
+                  (src.get("prompt_b") if src else b.prompt_b) or "", clean_emoji(src.get("emoji") if src else b.emoji), clean_variants(src.get("outbound_variants") if src else b.outbound_variants), clean_persona(src.get("agent_name") if src else b.agent_name), cur.lastrowid))
     if src:
         copy_sales_data(src["id"], cur.lastrowid)
     log("agente", f"nicho criado: {b.name}")
@@ -1023,9 +1032,9 @@ async def niche_update(nid: int, b: NicheIn):
     if not get_niche(nid):
         raise HTTPException(404, "nicho não encontrado")
     with conn() as c:
-        c.execute("UPDATE niches SET name=?,prompt=?,outbound_text=?,template=?,template_lang=?,keywords=?,knowledge=?,personalize=?,doc_hint=?,followup=?,prompt_b=?,ab_pct=?,emoji=?,outbound_variants=? WHERE id=?",
+        c.execute("UPDATE niches SET name=?,prompt=?,outbound_text=?,template=?,template_lang=?,keywords=?,knowledge=?,personalize=?,doc_hint=?,followup=?,prompt_b=?,ab_pct=?,emoji=?,outbound_variants=?,agent_name=? WHERE id=?",
                   (b.name.strip(), b.prompt, b.outbound_text, b.template.strip(), b.template_lang or "pt_BR", b.keywords.strip(), b.knowledge, int(b.personalize), b.doc_hint, int(b.followup),
-                   b.prompt_b, max(0, min(100, int(b.ab_pct or 0))), clean_emoji(b.emoji), clean_variants(b.outbound_variants), nid))
+                   b.prompt_b, max(0, min(100, int(b.ab_pct or 0))), clean_emoji(b.emoji), clean_variants(b.outbound_variants), clean_persona(b.agent_name), nid))
         if b.is_default:
             c.execute("INSERT OR REPLACE INTO settings(k,v) VALUES('default_niche',?)", (str(nid),))
     log("agente", f"nicho atualizado: {b.name}")
@@ -3197,7 +3206,7 @@ def line_summary(cfg=None):
     out = []
     for ln in db_lines():
         st = LINE_STATE.get(ln["id"]) or {}
-        out.append({"id": ln["id"], "label": ln["label"] or ln["id"], "active": bool(ln["active"]), "state": st.get("state") if PROVIDER == "qr" else "official",
+        out.append({"id": ln["id"], "label": ln["label"] or ln["id"], "persona": ln.get("persona") or "", "active": bool(ln["active"]), "state": st.get("state") if PROVIDER == "qr" else "official",
                     "me": st.get("me"), "sent_today": sent.get(ln["id"], 0), "allowed_today": allowed_today(cfg, ln["id"]),
                     "queued": q.get(ln["id"], 0), "next_in": max(0, round(LINE_NEXT.get(ln["id"], 0) - now)),
                     "warm_day": (line_warm_day(ln["id"]) + 1) if cfg["warmup"] and line_warm_day(ln["id"]) < 14 else None,
@@ -3249,6 +3258,8 @@ async def lines_put(line_id: str, b: dict):
             c.execute("UPDATE lines SET label=? WHERE id=?", (str(b["label"]).strip()[:40], line_id))
         if "active" in b:
             c.execute("UPDATE lines SET active=? WHERE id=?", (1 if b["active"] else 0, line_id))
+        if "persona" in b:
+            c.execute("UPDATE lines SET persona=? WHERE id=?", (clean_persona(str(b["persona"] or "")), line_id))
     log("conexao", f"número {line_id} atualizado")
     return {"ok": True}
 
@@ -8176,3 +8187,26 @@ async def variants_generate(nid: int):
         raise HTTPException(502, "Não consegui gerar variações agora. Tente de novo.")
     log("agente", f"variações de abertura geradas para {n['name']} (aguardando revisão)")
     return {"variants": vs}
+
+
+# ======================================================================
+# v29: nome do agente que dispara ({agente}): por número (opcional) ou por nicho
+# ======================================================================
+def migrate_v29():
+    with conn() as c:
+        for table, col in (("niches", "agent_name"), ("lines", "persona")):
+            if col not in {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
+migrate_v29()
+
+def clean_persona(n):
+    return re.sub(r"[^\w .'\-]", "", n or "").strip()[:30]
+
+def agent_persona(niche, line):
+    """Nome que o agente usa: o do número que está enviando (se tiver) ou o padrão do nicho."""
+    with conn() as c:
+        r = c.execute("SELECT persona FROM lines WHERE id=?", (line or "main",)).fetchone()
+    return clean_persona((r["persona"] if r else "") or niche.get("agent_name") or "")
+
+def fill_agent(text, persona):
+    return (text or "").replace("{agente}", persona) if persona else (text or "")

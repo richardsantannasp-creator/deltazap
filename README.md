@@ -57,6 +57,9 @@ O agente consulta horários livres e cria o evento de verdade em uma agenda do G
 ## Gestor de equipe (acesso próprio, número próprio, equipe própria)
 O administrador cria gestores em **Avisos > Gestores de equipe** (limites de números e de atendentes por gestor). O gestor entra em `/gestor`, conecta o WhatsApp dele, cria os atendentes dele e atende as conversas dos números dele, sem ver nada de outros. Transferências em números do gestor só vão para a equipe dele, e os números dos gestores nunca entram nos disparos do administrador. Detalhes em `GESTOR.md`.
 
+## Nome do agente automático ({agente})
+Escreva a abertura (e o prompt) com `{agente}`, por exemplo: "Aqui é {agente}, assistente virtual da Vida Mais". O sistema preenche com o **nome do número que está disparando** (Envio e conexão > "Nome do agente neste número", útil com vários números) ou, se o número não tiver nome, com o **nome do agente do nicho** (Agentes > "Nome do agente"). O agente se apresenta com o mesmo nome durante a conversa, e o lead que veio de um número continua falando com a mesma persona. Se a abertura usa `{agente}` e nenhum nome foi definido, o envio é bloqueado com um aviso claro. Com API oficial e template, vale o texto do template.
+
 ## Variações da abertura
 Em **Agentes > nicho > Variações da abertura** você pode ter até 5 outras versões do 1º contato (separadas por uma linha `---`) ou pedir ao Claude que gere 4 abordagens diferentes (pelo motivo, por uma pergunta, mais direta, mais calorosa) para você revisar e salvar. O sistema alterna entre a principal e as variações em partes iguais, e em **Funil > Aprender com as conversas** aparece "Qual abertura responde mais". Toda variação precisa identificar a assistente, e o SAIR é acrescentado se faltar; campos [ENTRE COLCHETES] pendentes bloqueiam o envio como na abertura principal. Com a API oficial e template configurado, vale o template (os textos aprovados pela Meta são fixos).
 

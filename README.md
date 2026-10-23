@@ -98,8 +98,9 @@ Atendentes e gestores instalam o painel na tela inicial (PWA) e recebem **avisos
 
 ## Fotos de perfil no chat
 - No modo **QR**, a lista de leads, o cabeçalho e cada mensagem mostram a **foto de perfil do WhatsApp** do cliente; as respostas (IA ou operador que assumiu a conversa) mostram a foto do **número conectado**, e em **Números** e **Avisos** aparecem as fotos de cada número e de quem recebe os avisos. Sem foto (ou foto privada), aparecem as iniciais.
-- Na **API oficial** a Meta não entrega fotos de perfil: o painel usa as iniciais.
-- A foto é consultada só quando a conversa é aberta, fica em cache (24 h; 6 h quando não há foto) e é apagada junto com os dados do contato (**Apagar dados**). A exportação LGPD informa se havia foto guardada. Leads de teste e números desconhecidos nunca são consultados.
+- Na **API oficial** a Meta não entrega fotos de perfil: o painel usa as iniciais (não há como obter a foto real nesse modo).
+- Se um contato do modo QR aparece sem foto, é porque ele escondeu a foto nas configurações de privacidade (só quem tem o contato salvo vê) ou não tem foto. Nesses casos o WhatsApp não entrega a imagem. O motivo de cada falha fica no log do conector (`docker compose logs gateway | grep foto`).
+- A foto é consultada só quando a conversa é aberta, fica em cache (24 h; 30 min quando não há foto) e é apagada junto com os dados do contato (**Apagar dados**). A exportação LGPD informa se havia foto guardada. Leads de teste e números desconhecidos nunca são consultados.
 
 ## Emojis no chat
 O botão 😊 ao lado do campo de mensagem abre um seletor de emojis (rostos, gestos, símbolos e objetos) que insere no ponto do cursor. Os agentes usam emoji com moderação, conforme o prompt de cada nicho.

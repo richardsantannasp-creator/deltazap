@@ -4759,7 +4759,7 @@ async def lead_handoff(phone: str):
 # v8d: fotos de perfil no chat (contato e número do operador)
 # ======================================================================
 AVATAR_TTL_OK = 24 * 3600          # foto encontrada: confere de novo a cada 24 h
-AVATAR_TTL_MISS = 6 * 3600         # sem foto (ou privada): tenta de novo a cada 6 h
+AVATAR_TTL_MISS = 1800             # sem foto (ou privada): tenta de novo a cada 30 min
 AVATAR_MAX = 400_000
 
 def migrate_v8d():

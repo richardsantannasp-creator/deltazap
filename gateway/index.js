@@ -211,8 +211,11 @@ app.get('/photo', async (req, res) => {
     if (to === 'me') { if (!s.me) return res.status(404).json({ error: 'sem número' }); jid = `${s.me}@s.whatsapp.net` }
     else if (!to) return res.status(400).json({ error: 'to é obrigatório' })
     else { jid = jids[jk(s.id, to)] || `${to.replace(/\D/g, '')}@s.whatsapp.net` }
-    let url
-    try { url = await s.sock.profilePictureUrl(jid, 'image') } catch { return res.status(404).json({ error: 'sem foto' }) }
+    let url, why = ''
+    for (const kind of ['image', 'preview']) {   // tenta a foto em alta e, se falhar, a miniatura
+      try { url = await s.sock.profilePictureUrl(jid, kind); if (url) break } catch (e) { why = String(e?.message || e) }
+    }
+    if (!url) { console.log(`[foto] ${jid.replace(/\d(?=\d{4})/g, '*')}: sem foto (${why || 'vazio'})`); return res.status(404).json({ error: 'sem foto' }) }
     if (!url) return res.status(404).json({ error: 'sem foto' })
     const r = await fetch(url)
     if (!r.ok) return res.status(404).json({ error: 'sem foto' })

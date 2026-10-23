@@ -25,6 +25,7 @@ PDFSIM = {"fn": lambda k: "# Tabela\n| Plano | Valor |\n|---|---|\n| Ouro | R$ 1
 SUPA = {"objects": {}, "calls": [], "fail": 0, "badkey": 0, "nobucket": 0, "public": False}
 GCAL = {"calls": [], "busy": [], "events": {}, "n": 0, "pub": None, "token_fail": 0, "forbidden": 0, "tokens": 0, "fail_create": 0}
 MEDIA = {"sent": [], "graph": [], "window": 0, "fail": 0}
+WASIM = {"phone": {"display_phone_number": "+55 21 99999-0000", "verified_name": "Minha Corretora", "quality_rating": "GREEN", "name_status": "APPROVED", "messaging_limit_tier": "TIER_250"}, "templates": [{"name": "planos_de_saude_abertura", "status": "APPROVED"}], "tpl_error": 0, "phone_status": 200}
 PAYSIM = {"calls": [], "fail": 0, "badkey": 0, "n": 0}
 PD = {"persons": [], "deals": {}, "notes": [], "acts": [], "fail": 0, "calls": []}
 HS = {"contacts": [], "deals": {}, "notes": [], "assoc": [], "fail": 0, "calls": []}
@@ -126,6 +127,9 @@ class FakeClient:
             return _fake_google(method, url, headers or {}, json, k.get("data"))
         if "graph.facebook.com" in url:
             MEDIA["graph"].append({"url": url, "json": json, "files": k.get("files"), "data": k.get("data")})
+            if method == "GET" and "message_templates" in url: return FakeResp(200, {"data": WASIM["templates"]})
+            if method == "GET": return FakeResp(WASIM["phone_status"], WASIM["phone"] if WASIM["phone_status"] < 300 else {"error": {"message": "Invalid OAuth"}})
+            if WASIM["tpl_error"] and json and json.get("type") == "template": return FakeResp(400, {"error": {"code": 132001, "message": "Template name does not exist in the translation"}})
             if url.endswith("/media"): return FakeResp(500, {}) if MEDIA["fail"] else FakeResp(200, {"id": "media_1"})
             if MEDIA["window"]: return FakeResp(400, {"error": {"code": 131047, "message": "Re-engagement message"}})
             return FakeResp(200, {"messages": [{"id": "wamid.x"}]})

@@ -22,6 +22,7 @@ HERE = Path(__file__).parent
 MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-5-5")
 WA_TOKEN = os.getenv("WHATSAPP_TOKEN", "")
 WA_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID", "")
+WA_WABA = os.getenv("WHATSAPP_WABA_ID", "")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "troque-este-token")
 APP_SECRET = os.getenv("META_APP_SECRET", "")
 DASH_TOKEN = os.getenv("DASH_TOKEN", "")
@@ -905,6 +906,10 @@ async def webhook(req: Request, bg: BackgroundTasks):
         if not hmac.compare_digest(req.headers.get("X-Hub-Signature-256", ""), exp):
             raise HTTPException(403)
     data = json.loads(raw)
+    try:
+        set_setting("wa_webhook_last", str(time.time()))      # a tela de prontidão mostra que a Meta está chamando
+    except Exception:
+        pass
     for e in data.get("entry", []):
         for ch in e.get("changes", []):
             v = ch.get("value", {})
@@ -6402,7 +6407,7 @@ migrate_v17()
 AUDIT_SKIP = re.compile(r"^/(webhook|gateway/|pay/webhook/)|^/api/(push|simulate|simulate-file|contacts/parse|test-lead)\b|/suggest$|^/api/agent/status$")
 AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale; "T" indica onde está o alvo (grupo 1).
     ("POST", r"^/api/niches$", "Criou agente/nicho"), ("PUT", r"^/api/niches/(\d+)$", "Alterou agente/nicho"), ("DELETE", r"^/api/niches/(\d+)$", "Excluiu agente/nicho"),
-    ("PUT", r"^/api/playbook$", "Alterou o playbook de objeções"), ("DELETE", r"^/api/leads/([^/]+)/memory$", "Apagou a memória do lead"), ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
+    ("POST", r"^/api/official/test-template$", "Enviou template de teste (API oficial)"), ("PUT", r"^/api/playbook$", "Alterou o playbook de objeções"), ("DELETE", r"^/api/leads/([^/]+)/memory$", "Apagou a memória do lead"), ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
     ("POST", r"^/api/dispatch$", "Criou disparo"), ("PUT", r"^/api/pacing$", "Alterou ritmo de envio"), ("POST", r"^/api/outbox/pause$", "Pausou/retomou a fila de envio"), ("POST", r"^/api/outbox/clear$", "Limpou a fila de envio"),
     ("POST", r"^/api/connection/pair$", "Gerou código de conexão do WhatsApp"), ("POST", r"^/api/connection/logout$", "Desconectou o WhatsApp"),
     ("POST", r"^/api/lines$", "Adicionou número de WhatsApp"), ("PUT", r"^/api/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/lines/([\w-]+)$", "Removeu número de WhatsApp"),
@@ -7964,3 +7969,134 @@ async def playbook_api_put(b: PlaybookIn):
                 c.execute("DELETE FROM playbook WHERE niche_id=? AND key=?", (b.niche_id, it.key))
     log("agente", f"playbook de objeções do nicho {b.niche_id}: {n} orientação(ões)")
     return {"ok": True, "active": n}
+
+
+# ======================================================================
+# v27: prontidão da API oficial (Cloud API da Meta): checklist, templates prontos e teste de envio
+# ======================================================================
+def _slug(t):
+    t = unicodedata.normalize("NFKD", t or "").encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", "_", t).strip("_")[:40] or "nicho"
+
+def official_webhook_url():
+    base = os.getenv("PUBLIC_URL", "").strip().rstrip("/")
+    if not base and os.getenv("SDR_DOMAIN"):
+        base = "https://" + os.getenv("SDR_DOMAIN", "").strip()
+    return (base or "https://SEU-DOMINIO") + "/webhook"
+
+def template_body(text):
+    """Texto de abertura do nicho no formato da Meta: só a variável {{1}} (primeiro nome), com SAIR, sem campos pendentes."""
+    t = (text or "").replace("{nome}", "{{1}}").replace("{empresa}", "sua empresa")
+    pend = PLACEHOLDER_RE.findall(t)
+    if "sair" not in t.lower():
+        t = t.rstrip() + " Se não quiser receber mensagens, responda SAIR."
+    return t.strip(), pend
+
+RETOMADA_TEMPLATES = [
+    ("retomada_1", "Oi, {{1}}! Passando para saber se você ainda tem interesse. Posso continuar de onde paramos? Para não receber mais mensagens, responda SAIR."),
+    ("retomada_2", "{{1}}, ficou alguma dúvida que eu possa tirar? Estou por aqui. Para não receber mais mensagens, responda SAIR."),
+    ("retomada_3", "Oi, {{1}}! Não quero ser insistente, então vou deixar o seu atendimento em pausa. Se precisar, é só me chamar. Para não receber mais mensagens, responda SAIR."),
+]
+
+async def _graph_get(path, params=""):
+    async with httpx.AsyncClient(timeout=15) as h:
+        return await h.get(f"https://graph.facebook.com/{GRAPH}/{path}{params}", headers={"Authorization": f"Bearer {WA_TOKEN}"})
+
+@app.get("/api/official/readiness", dependencies=[Depends(auth)])
+async def official_readiness():
+    it = []
+    add = lambda id_, label, st, detail, help_="": it.append({"id": id_, "label": label, "status": st, "detail": detail, "help": help_})
+    add("provider", "Modo de envio", "ok" if PROVIDER == "official" else "aviso", "API oficial" if PROVIDER == "official" else "ainda em QR (PROVIDER=qr)",
+        "" if PROVIDER == "official" else "A troca acontece quando você definir PROVIDER=official no .env e reiniciar. Até lá nada muda.")
+    add("token", "Token permanente (WHATSAPP_TOKEN)", "ok" if WA_TOKEN else "erro", "preenchido" if WA_TOKEN else "vazio", "" if WA_TOKEN else "Meta Business > Usuários do sistema > gerar token com whatsapp_business_messaging e whatsapp_business_management.")
+    add("phone", "ID do número (WHATSAPP_PHONE_ID)", "ok" if WA_PHONE_ID else "erro", "preenchido" if WA_PHONE_ID else "vazio", "" if WA_PHONE_ID else "WhatsApp > Configuração da API > ID do número de telefone.")
+    add("secret", "Segredo do app (META_APP_SECRET)", "ok" if APP_SECRET else "erro", "preenchido" if APP_SECRET else "vazio", "" if APP_SECRET else "Configurações do app > Básico > Chave secreta do app. Sem ele o webhook não valida a assinatura.")
+    vt = VERIFY_TOKEN != "troque-este-token"
+    add("verify", "Token de verificação (VERIFY_TOKEN)", "ok" if vt else "erro", "definido" if vt else "ainda o valor padrão", "" if vt else "Invente uma senha longa, ponha no .env e use a mesma no webhook da Meta.")
+    last = float(get_setting("wa_webhook_last", "0") or 0)
+    add("webhook", "Webhook da Meta", "ok" if last else "aviso", f"URL: {official_webhook_url()} · " + (f"última chamada {datetime.fromtimestamp(last, TZ):%d/%m %H:%M}" if last else "a Meta ainda não chamou"),
+        "" if last else "Em WhatsApp > Configuração > Webhook, use essa URL e o VERIFY_TOKEN, e assine o campo messages.")
+    quality = None
+    if WA_TOKEN and WA_PHONE_ID:
+        try:
+            r = await _graph_get(WA_PHONE_ID, "?fields=display_phone_number,verified_name,quality_rating,name_status,messaging_limit_tier")
+            if r.status_code < 300:
+                d = r.json(); quality = d
+                q = (d.get("quality_rating") or "").upper()
+                add("number", "Número na Meta", "ok", f"{d.get('display_phone_number', '?')} · nome verificado: {d.get('verified_name', '?')} ({d.get('name_status', '?')})")
+                add("quality", "Qualidade do número", {"GREEN": "ok", "YELLOW": "aviso", "RED": "erro"}.get(q, "aviso"),
+                    {"GREEN": "verde (boa)", "YELLOW": "amarela (atenção)", "RED": "vermelha (risco de restrição)"}.get(q, q or "sem classificação") + (f" · limite: {d['messaging_limit_tier']}" if d.get("messaging_limit_tier") else ""),
+                    "" if q == "GREEN" else "A qualidade cai com denúncias e bloqueios. Reduza o volume, use só contatos com opt-in e revise o texto das aberturas.")
+            else:
+                add("number", "Número na Meta", "erro", f"a Meta respondeu {r.status_code}", "Token expirado, sem permissão ou ID do número errado.")
+        except Exception as e:
+            add("number", "Número na Meta", "erro", str(e)[:100], "Sem acesso a graph.facebook.com?")
+    approved = {}
+    if WA_TOKEN and WA_WABA:
+        try:
+            r = await _graph_get(WA_WABA, "/message_templates?fields=name,status,language&limit=200")
+            if r.status_code < 300:
+                for t in r.json().get("data", []):
+                    approved.setdefault(t["name"], t.get("status", ""))
+        except Exception:
+            pass
+    elif WA_TOKEN:
+        add("waba", "ID da conta do WhatsApp Business (WHATSAPP_WABA_ID)", "aviso", "vazio", "Opcional: preencha para ver aqui o status dos templates (aprovado, pendente, rejeitado).")
+    with conn() as c:
+        niches = [dict(r) for r in c.execute("SELECT id,name,template FROM niches ORDER BY id")]
+    for n in niches:
+        if not n["template"]:
+            add("tpl_" + str(n["id"]), f"Template de abertura · {n['name']}", "aviso", "sem template", "Crie na aba Templates abaixo e informe o nome no editor do nicho. Sem ele, o primeiro contato não sai pela API oficial.")
+        else:
+            st = approved.get(n["template"])
+            add("tpl_" + str(n["id"]), f"Template de abertura · {n['name']}", "ok" if st == "APPROVED" else ("aviso" if st or not approved else "erro"),
+                f"{n['template']}" + (f" · {st}" if st else " · status desconhecido (defina WHATSAPP_WABA_ID)" if not WA_WABA else " · não encontrado na Meta"),
+                "" if st == "APPROVED" else "Só envia depois de aprovado pela Meta.")
+    steps = sum(1 for _ in it)
+    return {"items": it, "ready": all(i["status"] == "ok" for i in it if i["id"] in ("token", "phone", "secret", "verify", "number")) and PROVIDER == "official",
+            "webhook_url": official_webhook_url(), "quality": (quality or {}).get("quality_rating")}
+
+@app.get("/api/official/templates", dependencies=[Depends(auth)])
+async def official_templates():
+    out = []
+    with conn() as c:
+        niches = [dict(r) for r in c.execute("SELECT id,name,outbound_text,template FROM niches ORDER BY id")]
+    for n in niches:
+        body, pend = template_body(n["outbound_text"])
+        out.append({"niche_id": n["id"], "niche": n["name"], "name": f"{_slug(n['name'])}_abertura", "current": n["template"], "category": "MARKETING", "language": "pt_BR",
+                    "body": body, "example": "Maria", "pending": pend,
+                    "note": "Preencha os campos entre colchetes no nicho antes de enviar para aprovação." if pend else ""})
+    for name, body in RETOMADA_TEMPLATES:
+        out.append({"niche_id": 0, "niche": "Retomada (todos os nichos)", "name": name, "current": "", "category": "MARKETING", "language": "pt_BR", "body": body, "example": "Maria", "pending": [], "note": ""})
+    return {"templates": out, "tips": ["Use só a variável {{1}} (primeiro nome): é a única que o sistema preenche.", "Mantenha o SAIR: a Meta e a LGPD exigem uma forma simples de parar de receber.",
+                                       "Categoria Marketing é a mais provável para prospecção; a Meta pode reclassificar.", "Depois de aprovado, informe o nome do template no nicho (Agentes) ou na etapa da Retomada."]}
+
+class TplTestIn(BaseModel):
+    phone: str
+    template: str
+    language: str = "pt_BR"
+    name: str = "Teste"
+
+@app.post("/api/official/test-template", dependencies=[Depends(auth)])
+async def official_test_template(b: TplTestIn):
+    """Manda um template aprovado para um número SEU, para confirmar que a Meta aceita antes de usar com leads."""
+    if not (WA_TOKEN and WA_PHONE_ID):
+        raise HTTPException(400, "Preencha WHATSAPP_TOKEN e WHATSAPP_PHONE_ID no .env primeiro")
+    phone = norm_phone(b.phone)
+    if not phone:
+        raise HTTPException(400, "Número inválido")
+    if not re.fullmatch(r"[a-z0-9_]{1,512}", b.template or ""):
+        raise HTTPException(400, "Nome de template inválido (letras minúsculas, números e _)")
+    payload = {"messaging_product": "whatsapp", "to": phone, "type": "template",
+               "template": {"name": b.template, "language": {"code": b.language or "pt_BR"}, "components": [{"type": "body", "parameters": [{"type": "text", "text": (b.name or "Teste")[:30]}]}]}}
+    async with httpx.AsyncClient(timeout=20) as h:
+        r = await h.post(f"https://graph.facebook.com/{GRAPH}/{WA_PHONE_ID}/messages", headers={"Authorization": f"Bearer {WA_TOKEN}"}, json=payload)
+    if r.status_code < 300:
+        log("oficial", f"template de teste «{b.template}» enviado para ...{phone[-4:]}")
+        return {"ok": True}
+    try:
+        e = (r.json().get("error") or {})
+        msg = f"{e.get('message', r.text)[:250]} (código {e.get('code', r.status_code)})"
+    except Exception:
+        msg = r.text[:250]
+    return {"ok": False, "error": msg}

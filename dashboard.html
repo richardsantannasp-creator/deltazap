@@ -162,6 +162,13 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
  <table><thead><tr><th>Fila e últimos envios</th><th>Nicho</th><th>Status</th></tr></thead><tbody id="bq"></tbody></table>
  <div class="note">Aviso: conexão por QR code usa uma biblioteca não oficial e pode violar os Termos do WhatsApp. Atrasos e limites ajudam, mas nenhuma configuração garante que o número não seja bloqueado. Dispare apenas para quem consentiu e mantenha a opção SAIR.</div>
 </div></div></section>
+<section class="col" style="grid-column:1/-1"><h2><span>API oficial do WhatsApp <span class="note" id="of_n"></span></span><button class="g" id="of_re">Verificar de novo</button></h2><div class="scroll"><div style="padding:12px">
+ <div class="note">Prontidão para trocar o QR pela API oficial da Meta. Nada aqui muda o modo de envio: isso só acontece quando você define PROVIDER=official no .env.</div>
+ <div id="of_l"></div>
+ <h3 style="margin:14px 0 4px;font-size:14px">Templates para aprovar na Meta</h3><div class="note">Copie o nome, a categoria e o texto para o Gerenciador do WhatsApp (Modelos de mensagem). Use só {{1}} para o primeiro nome. Depois de aprovado, informe o nome no nicho (Agentes) ou na etapa de Retomada.</div><div id="of_t"></div>
+ <h3 style="margin:14px 0 4px;font-size:14px">Testar um template aprovado</h3>
+ <div class="row" style="align-items:flex-end"><div><label>Seu número (com DDD)</label><input type="text" id="of_ph" placeholder="21999990000"></div><div><label>Nome do template</label><input type="text" id="of_tn" placeholder="planos_de_saude_abertura"></div><button id="of_go">Enviar teste</button></div><div class="note" id="of_m"></div>
+</div></div></section>
 </main>
 
 <input type="file" id="lf" accept=".txt,.md,text/plain,text/markdown" class="hide">
@@ -485,7 +492,14 @@ async function loadConn(){try{await loadLines();const c=await api("/api/connecti
  else h=`<div class="note">Modo API oficial da Meta (${esc(c.state)}). Para usar QR code, defina PROVIDER=qr no .env e rode o gateway.</div>`;
  if(h!==window._qrh){window._qrh=h;$("qrbox").innerHTML=h}
  $("pairbox").classList.toggle("hide",!(c.provider=="qr"&&c.state=="qr"));if($("lo"))$("lo").onclick=async()=>{if(confirm("Desconectar este número?")){await api("/api/connection/logout?line="+encodeURIComponent(curLine),{});loadConn()}}}catch(e){}}
-async function loadEnvio(){loadConn();const m=await api("/api/metrics"),c=await api("/api/pacing");
+const OFC={ok:"✅",aviso:"⚠️",erro:"❌"};
+async function loadOfficial(){try{const d=await api("/api/official/readiness");$("of_n").textContent=d.ready?"pronto para ligar":"faltam itens";
+ $("of_l").innerHTML=d.items.map(i=>`<div style="padding:6px 0;border-top:1px solid var(--bd)">${OFC[i.status]||""} <b>${esc(i.label)}</b> <small>· ${esc(i.detail)}</small>${i.help?`<div class="note">${esc(i.help)}</div>`:""}</div>`).join("");
+ const t=await api("/api/official/templates");$("of_t").innerHTML=t.templates.map((x,k)=>`<div style="padding:8px 0;border-top:1px solid var(--bd)"><b>${esc(x.niche)}</b> <small>· nome: <code>${esc(x.name)}</code> · ${esc(x.category)} · ${esc(x.language)}</small>${x.current?` <small>· no nicho: ${esc(x.current)}</small>`:""}<div style="white-space:pre-wrap;margin:4px 0">${esc(x.body)}</div>${x.note?`<div class="note">${esc(x.note)}</div>`:""}<button class="g oft" data-k="${k}">Copiar texto</button> <small>exemplo da variável: ${esc(x.example)}</small></div>`).join("");
+ document.querySelectorAll("#of_t .oft").forEach(b=>b.onclick=async()=>{try{await navigator.clipboard.writeText(t.templates[+b.dataset.k].body);b.textContent="Copiado"}catch(e){b.textContent="Selecione e copie"}})}catch(e){$("of_l").textContent=e.message}}
+$("of_re").onclick=loadOfficial;
+$("of_go").onclick=async()=>{$("of_m").textContent="";try{const r=await api("/api/official/test-template",{phone:$("of_ph").value,template:$("of_tn").value.trim()});$("of_m").textContent=r.ok?"Enviado. Confira o WhatsApp do número informado.":"A Meta recusou: "+r.error}catch(e){$("of_m").textContent=e.message}};
+async function loadEnvio(){loadConn();loadOfficial();const m=await api("/api/metrics"),c=await api("/api/pacing");
  $("mrisk").textContent="Risco estimado: "+m.risk;
  const K=[["Enviados hoje",`${m.sent_today} / ${m.allowed_today}`],["Na fila",m.queued],["Falhas hoje",m.failed_today],["Resposta (7d)",m.reply_pct+"%"],["Saídas/descartes (7d)",m.optout_pct+"%"],["Próximo envio em",m.paused||m.autopause?"pausado":!m.window_open?"fora da janela":mm(m.next_in)],["Intervalo médio",m.avg_gap?mm(m.avg_gap):"—"],["Janela agora",m.window_open?"aberta":"fechada"]];
  $("kpis").innerHTML=K.map(([a,b])=>`<div class="kpi"><small>${a}</small><b>${b}</b></div>`).join("");

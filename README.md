@@ -57,6 +57,9 @@ O agente consulta horários livres e cria o evento de verdade em uma agenda do G
 ## Gestor de equipe (acesso próprio, número próprio, equipe própria)
 O administrador cria gestores em **Avisos > Gestores de equipe** (limites de números e de atendentes por gestor). O gestor entra em `/gestor`, conecta o WhatsApp dele, cria os atendentes dele e atende as conversas dos números dele, sem ver nada de outros. Transferências em números do gestor só vão para a equipe dele, e os números dos gestores nunca entram nos disparos do administrador. Detalhes em `GESTOR.md`.
 
+## API oficial: prontidão e migração
+Veja `MIGRACAO-API-OFICIAL.md`. Em **Envio e conexão > API oficial do WhatsApp** o painel confere token, número, segredo, webhook (última chamada da Meta), qualidade do número (verde/amarelo/vermelho) e status dos templates, traz os textos prontos para aprovar e envia um template de teste para o seu número.
+
 ## Playbook de objeções
 Em **Funil > Playbook de objeções** você define, por nicho, como o agente conduz as 8 objeções mais comuns (preço, já tenho, sem tempo, sem interesse, mandar informações, decisor, depois, desconfiança). O botão **Preencher sugestões** traz um ponto de partida que você edita. O texto entra no prompt como orientação aprovada: o agente adapta com as próprias palavras e continua proibido de citar preço, desconto ou prazo fora da base (a revisão antes de enviar confere). Ao lado de cada objeção aparecem quantos leads a levantaram em 90 dias e quantos continuaram ou avançaram, para você ajustar o que não funciona. Copiar um nicho copia o playbook.
 

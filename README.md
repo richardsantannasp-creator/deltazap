@@ -57,6 +57,9 @@ O agente consulta horários livres e cria o evento de verdade em uma agenda do G
 ## Gestor de equipe (acesso próprio, número próprio, equipe própria)
 O administrador cria gestores em **Avisos > Gestores de equipe** (limites de números e de atendentes por gestor). O gestor entra em `/gestor`, conecta o WhatsApp dele, cria os atendentes dele e atende as conversas dos números dele, sem ver nada de outros. Transferências em números do gestor só vão para a equipe dele, e os números dos gestores nunca entram nos disparos do administrador. Detalhes em `GESTOR.md`.
 
+## Variações da abertura
+Em **Agentes > nicho > Variações da abertura** você pode ter até 5 outras versões do 1º contato (separadas por uma linha `---`) ou pedir ao Claude que gere 4 abordagens diferentes (pelo motivo, por uma pergunta, mais direta, mais calorosa) para você revisar e salvar. O sistema alterna entre a principal e as variações em partes iguais, e em **Funil > Aprender com as conversas** aparece "Qual abertura responde mais". Toda variação precisa identificar a assistente, e o SAIR é acrescentado se faltar; campos [ENTRE COLCHETES] pendentes bloqueiam o envio como na abertura principal. Com a API oficial e template configurado, vale o template (os textos aprovados pela Meta são fixos).
+
 ## API oficial: prontidão e migração
 Veja `MIGRACAO-API-OFICIAL.md`. Em **Envio e conexão > API oficial do WhatsApp** o painel confere token, número, segredo, webhook (última chamada da Meta), qualidade do número (verde/amarelo/vermelho) e status dos templates, traz os textos prontos para aprovar e envia um template de teste para o seu número.
 

@@ -648,7 +648,7 @@ PLACEHOLDER_RE = re.compile(r"\[[A-ZÁÉÍÓÚÂÊÔÃÕÇ][A-ZÁÉÍÓÚÂÊÔ�
 def unfilled_fields(niche):
     """Campos do tipo [NOME] / [EMPRESA] que ainda não foram preenchidos na abertura ou no prompt do nicho."""
     found = []
-    for k in ("outbound_text", "prompt"):
+    for k in ("outbound_text", "outbound_variants", "prompt"):
         for m in PLACEHOLDER_RE.findall(niche.get(k) or ""):
             if m not in found:
                 found.append(m)
@@ -669,10 +669,12 @@ async def dispatch_one(niche, phone, name, company, context="", line=None, conse
     upsert_lead(phone, name, company, niche_id=niche["id"], origin="ativo")
     set_lead(phone, niche_id=niche["id"], origin="ativo", **({"line": line} if line else {}), **({"consent_origin": consent, "consent_at": time.time()} if consent else {}))
     fn = first_name(name)
-    text = niche["outbound_text"].replace("{nome}", fn).replace("{empresa}", company or "")
+    use_template = PROVIDER == "official" and niche["template"]
+    vidx, base = (0, niche["outbound_text"]) if use_template else pick_opening(niche, phone)
+    text = base.replace("{nome}", fn).replace("{empresa}", company or "")
     if "sair" not in text.lower():
         text += " Se não quiser receber mensagens, responda SAIR."
-    use_template = PROVIDER == "official" and niche["template"]
+    set_lead(phone, opening_variant=vidx)
     if niche.get("personalize") and not use_template:
         text = await personalized_opening(niche, name, company, context, text)
     if use_template:
@@ -954,6 +956,7 @@ class NicheIn(BaseModel):
     is_default: bool = False
     copy_from: int | None = None
     emoji: str = "moderado"      # nenhum | pouco | moderado | bastante
+    outbound_variants: str = ""  # outras aberturas do 1º contato, separadas por uma linha com ---
 
 class DispatchIn(BaseModel):
     niche_id: int
@@ -1008,8 +1011,8 @@ async def niche_create(b: NicheIn):
     data = (b.name.strip(), prompt, ob, tpl, lang, "" if src else b.keywords.strip(), kb, pz, dh, time.time())
     with conn() as c:
         cur = c.execute("INSERT INTO niches(name,prompt,outbound_text,template,template_lang,keywords,knowledge,personalize,doc_hint,created) VALUES(?,?,?,?,?,?,?,?,?,?)", data)
-        c.execute("UPDATE niches SET followup=?, prompt_b=?, emoji=? WHERE id=?", (int(src["followup"]) if src and "followup" in src else int(b.followup),
-                  (src.get("prompt_b") if src else b.prompt_b) or "", clean_emoji(src.get("emoji") if src else b.emoji), cur.lastrowid))
+        c.execute("UPDATE niches SET followup=?, prompt_b=?, emoji=?, outbound_variants=? WHERE id=?", (int(src["followup"]) if src and "followup" in src else int(b.followup),
+                  (src.get("prompt_b") if src else b.prompt_b) or "", clean_emoji(src.get("emoji") if src else b.emoji), clean_variants(src.get("outbound_variants") if src else b.outbound_variants), cur.lastrowid))
     if src:
         copy_sales_data(src["id"], cur.lastrowid)
     log("agente", f"nicho criado: {b.name}")
@@ -1020,9 +1023,9 @@ async def niche_update(nid: int, b: NicheIn):
     if not get_niche(nid):
         raise HTTPException(404, "nicho não encontrado")
     with conn() as c:
-        c.execute("UPDATE niches SET name=?,prompt=?,outbound_text=?,template=?,template_lang=?,keywords=?,knowledge=?,personalize=?,doc_hint=?,followup=?,prompt_b=?,ab_pct=?,emoji=? WHERE id=?",
+        c.execute("UPDATE niches SET name=?,prompt=?,outbound_text=?,template=?,template_lang=?,keywords=?,knowledge=?,personalize=?,doc_hint=?,followup=?,prompt_b=?,ab_pct=?,emoji=?,outbound_variants=? WHERE id=?",
                   (b.name.strip(), b.prompt, b.outbound_text, b.template.strip(), b.template_lang or "pt_BR", b.keywords.strip(), b.knowledge, int(b.personalize), b.doc_hint, int(b.followup),
-                   b.prompt_b, max(0, min(100, int(b.ab_pct or 0))), clean_emoji(b.emoji), nid))
+                   b.prompt_b, max(0, min(100, int(b.ab_pct or 0))), clean_emoji(b.emoji), clean_variants(b.outbound_variants), nid))
         if b.is_default:
             c.execute("INSERT OR REPLACE INTO settings(k,v) VALUES('default_niche',?)", (str(nid),))
     log("agente", f"nicho atualizado: {b.name}")
@@ -6407,7 +6410,7 @@ migrate_v17()
 AUDIT_SKIP = re.compile(r"^/(webhook|gateway/|pay/webhook/)|^/api/(push|simulate|simulate-file|contacts/parse|test-lead)\b|/suggest$|^/api/agent/status$")
 AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale; "T" indica onde está o alvo (grupo 1).
     ("POST", r"^/api/niches$", "Criou agente/nicho"), ("PUT", r"^/api/niches/(\d+)$", "Alterou agente/nicho"), ("DELETE", r"^/api/niches/(\d+)$", "Excluiu agente/nicho"),
-    ("POST", r"^/api/official/test-template$", "Enviou template de teste (API oficial)"), ("PUT", r"^/api/playbook$", "Alterou o playbook de objeções"), ("DELETE", r"^/api/leads/([^/]+)/memory$", "Apagou a memória do lead"), ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
+    ("POST", r"^/api/niches/(\d+)/variants/generate$", "Gerou variações da abertura"), ("POST", r"^/api/official/test-template$", "Enviou template de teste (API oficial)"), ("PUT", r"^/api/playbook$", "Alterou o playbook de objeções"), ("DELETE", r"^/api/leads/([^/]+)/memory$", "Apagou a memória do lead"), ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
     ("POST", r"^/api/dispatch$", "Criou disparo"), ("PUT", r"^/api/pacing$", "Alterou ritmo de envio"), ("POST", r"^/api/outbox/pause$", "Pausou/retomou a fila de envio"), ("POST", r"^/api/outbox/clear$", "Limpou a fila de envio"),
     ("POST", r"^/api/connection/pair$", "Gerou código de conexão do WhatsApp"), ("POST", r"^/api/connection/logout$", "Desconectou o WhatsApp"),
     ("POST", r"^/api/lines$", "Adicionou número de WhatsApp"), ("PUT", r"^/api/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/lines/([\w-]+)$", "Removeu número de WhatsApp"),
@@ -7198,7 +7201,7 @@ TERMINAL_STAGES = ("reuniao_agendada", "encaminhado", "humano", "descartado")
 def insights_report(niche_id, days=30):
     days = max(7, min(int(days or 30), 180)); now = time.time(); since = now - days * 86400
     with conn() as c:
-        leads = [dict(r) for r in c.execute("SELECT phone,name,stage,outcome,created FROM leads WHERE test=0 AND niche_id=? AND created>=? ORDER BY created DESC LIMIT 3000", (niche_id, since))]
+        leads = [dict(r) for r in c.execute("SELECT phone,name,stage,outcome,created,COALESCE(opening_variant,0) AS ov FROM leads WHERE test=0 AND niche_id=? AND created>=? ORDER BY created DESC LIMIT 3000", (niche_id, since))]
         phones = [l["phone"] for l in leads]
         msgs = defaultdict(list)
         for i in range(0, len(phones), 500):
@@ -7264,7 +7267,16 @@ def insights_report(niche_id, days=30):
         if fr and fr > r["sent_at"]:
             by_h[h][1] += 1
     hours = [{"hour": h, "sent": n, "reply_pct": round(rp * 100 / n)} for h, (n, rp) in sorted(by_h.items()) if n >= 5]
-    return {"niche_id": niche_id, "days": days, "leads": len(leads), "replied": len(replied), "positive": sum(1 for l in leads if positive(l)),
+    ov = {l["phone"]: l["ov"] for l in leads}
+    by_o = defaultdict(lambda: [0, 0])
+    for r in sent:
+        v = ov.get(r["phone"], 0)
+        by_o[v][0] += 1
+        fr = first_reply.get(r["phone"])
+        if fr and fr > r["sent_at"]:
+            by_o[v][1] += 1
+    openings = [{"variant": v, "label": "Principal" if v == 0 else f"Variação {v}", "sent": n, "replied": rp, "reply_pct": round(rp * 100 / n)} for v, (n, rp) in sorted(by_o.items())] if len(by_o) > 1 else []
+    return {"niche_id": niche_id, "openings": openings, "days": days, "leads": len(leads), "replied": len(replied), "positive": sum(1 for l in leads if positive(l)),
             "ghosted": {"total": len(ghosted), "by_replies": buckets, "last_agent_message": top_last},
             "objections": objections, "winners": winners, "hours": hours}
 
@@ -8100,3 +8112,67 @@ async def official_test_template(b: TplTestIn):
     except Exception:
         msg = r.text[:250]
     return {"ok": False, "error": msg}
+
+
+# ======================================================================
+# v28: variações da abertura do 1º contato (o agente alterna a abordagem e o painel mede qual responde mais)
+# ======================================================================
+def migrate_v28():
+    with conn() as c:
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(niches)")}
+        if "outbound_variants" not in cols:
+            c.execute("ALTER TABLE niches ADD COLUMN outbound_variants TEXT DEFAULT ''")
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(leads)")}
+        if "opening_variant" not in cols:
+            c.execute("ALTER TABLE leads ADD COLUMN opening_variant INTEGER DEFAULT 0")
+migrate_v28()
+
+MAX_VARIANTS = 5
+
+def parse_variants(txt):
+    out = []
+    for part in re.split(r"(?m)^\s*-{3,}\s*$", txt or ""):
+        t = " ".join(part.split())
+        if 20 <= len(t) <= 700 and t not in out:
+            out.append(t)
+    return out[:MAX_VARIANTS]
+
+def clean_variants(txt):
+    """Guarda só variações válidas e garante que toda abertura traga o SAIR."""
+    vs = []
+    for v in parse_variants(txt):
+        if "sair" not in v.lower():
+            v += " Se não quiser receber mensagens, responda SAIR."
+        vs.append(v)
+    return "\n---\n".join(vs)
+
+def pick_opening(niche, phone=""):
+    """(índice, texto): 0 é a abertura principal; as variações entram em rodízio equilibrado (a menos usada primeiro)."""
+    vs = parse_variants(niche.get("outbound_variants") or "")
+    if not vs:
+        return 0, niche["outbound_text"]
+    with conn() as c:
+        cnt = {r["v"]: r["n"] for r in c.execute("SELECT COALESCE(opening_variant,0) v, COUNT(*) n FROM leads WHERE niche_id=? AND test=0 AND origin='ativo' AND phone<>? GROUP BY v", (niche["id"], phone))}
+    options = [niche["outbound_text"]] + vs
+    low = min(cnt.get(i, 0) for i in range(len(options)))
+    idx = random.choice([i for i in range(len(options)) if cnt.get(i, 0) == low])
+    return idx, options[idx]
+
+VARIANTS_SYSTEM = ("VARIAÇÕES DE ABERTURA. Você recebe a mensagem de primeiro contato de uma SDR de WhatsApp e escreve 4 variações com ABORDAGENS diferentes "
+                   "(por exemplo: começar pelo motivo do contato; começar por uma pergunta; mais direta e curta; mais calorosa). Regras: português do Brasil; mantenha exatamente o nome da assistente e da empresa; "
+                   "deixe claro que é uma assistente virtual; mantenha {nome} onde fizer sentido; até 350 caracteres; UMA pergunta simples ou pedido de permissão; "
+                   "termine com \"Se não quiser receber mensagens, responda SAIR.\"; não invente fatos, preços, prazos nem promessas. Separe as variações com uma linha contendo apenas ---. Responda só com as variações.")
+
+@app.post("/api/niches/{nid}/variants/generate", dependencies=[Depends(auth)])
+async def variants_generate(nid: int):
+    n = get_niche(nid)
+    if not n:
+        raise HTTPException(404, "nicho não encontrado")
+    if not (n["outbound_text"] or "").strip():
+        raise HTTPException(400, "Escreva primeiro o texto do 1º contato")
+    txt = await claude_text([{"type": "text", "text": VARIANTS_SYSTEM}], [{"role": "user", "content": f"Nicho: {n['name']}\n\nMensagem principal:\n{n['outbound_text']}"}], 900, kind="abertura", niche_id=nid)
+    vs = parse_variants(clean_variants(txt))
+    if not vs:
+        raise HTTPException(502, "Não consegui gerar variações agora. Tente de novo.")
+    log("agente", f"variações de abertura geradas para {n['name']} (aguardando revisão)")
+    return {"variants": vs}

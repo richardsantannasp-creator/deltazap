@@ -275,6 +275,9 @@ class _Msgs:
             CALLS.append({"kind": "juiz", "tools": 0, "system": system, "user": last})
             if EVALSIM["judge_fail"]: raise RuntimeError("juiz fora do ar")
             return _text(EVALSIM["judge_raw"] or json.dumps({"precisao": 4, "qualificacao": 4, "tom": 5, "conducao": 4, "fechamento": 3, "violacoes": [], "resumo": "bom atendimento"}))
+        if "RASCUNHO DE AGENTE SDR" in system:
+            CALLS.append({"kind": "rascunho", "tools": 0, "system": system, "user": last})
+            return _text("ABERTURA: Oi {nome}! Aqui é {agente}, assistente virtual da Vida Mais. Posso te ajudar a comparar planos?\n---\nOlá {nome}, sou {agente}, assistente virtual da Vida Mais. Posso fazer 3 perguntas rápidas? Se não quiser receber mensagens, responda SAIR.\n---\n{nome}, {agente} aqui, da Vida Mais (assistente virtual). Quer ver opções de plano?\n---\nOi {nome}, {agente}, assistente virtual da Vida Mais. Posso te chamar para uma conversa rápida?")
         if "VARIAÇÕES DE ABERTURA" in system:
             CALLS.append({"kind": "variacoes", "tools": 0, "system": system})
             return _text("Oi {nome}! Aqui é a Ana, assistente virtual da Vida Mais. Posso te ajudar a comparar planos? Se não quiser receber mensagens, responda SAIR.\n---\nOlá {nome}, tudo bem? Sou a Ana, assistente virtual da Vida Mais, e vi seu pedido de cotação. Posso fazer 3 perguntas rápidas?\n---\n{nome}, aqui é a Ana, assistente virtual da Vida Mais. Quer ver as opções de plano de saúde? Se não quiser receber mensagens, responda SAIR.")

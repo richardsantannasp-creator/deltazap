@@ -280,3 +280,9 @@ GATEWAY_SECRET=<a mesma senha> npm start
 - Só dispare para quem consentiu ou tem base legal (LGPD). O painel exige a confirmação e registra no log. SAIR/PARAR descarta o lead.
 - Mantenha `DASH_TOKEN` forte: o painel mostra conversas de clientes.
 - No nicho de saúde, revise o prompt com seu jurídico/compliance. Revise as conversas no início antes de escalar o volume.
+
+
+## Assistente de primeira configuração
+Na aba **Agentes** há o card "Primeira configuração": uma lista do que falta (senha forte, chave do Claude, WhatsApp conectado, abertura, nome do agente, campos [..], conhecimento) e, em opcionais, variações e playbook.
+O botão "Gerar rascunho do agente com IA" pede empresa, o que oferece (só fatos reais), público e nome, e escreve o 1º contato + 3 variações, sempre com SAIR e sem inventar preço ou prazo.
+O rascunho **só vale depois que você revisa e clica em Aplicar**; nada é enviado a ninguém. Chaves e senhas continuam só no `.env` do servidor.

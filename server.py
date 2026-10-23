@@ -6421,7 +6421,7 @@ migrate_v17()
 AUDIT_SKIP = re.compile(r"^/(webhook|gateway/|pay/webhook/)|^/api/(push|simulate|simulate-file|contacts/parse|test-lead)\b|/suggest$|^/api/agent/status$")
 AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale; "T" indica onde está o alvo (grupo 1).
     ("POST", r"^/api/niches$", "Criou agente/nicho"), ("PUT", r"^/api/niches/(\d+)$", "Alterou agente/nicho"), ("DELETE", r"^/api/niches/(\d+)$", "Excluiu agente/nicho"),
-    ("POST", r"^/api/niches/(\d+)/variants/generate$", "Gerou variações da abertura"), ("POST", r"^/api/official/test-template$", "Enviou template de teste (API oficial)"), ("PUT", r"^/api/playbook$", "Alterou o playbook de objeções"), ("DELETE", r"^/api/leads/([^/]+)/memory$", "Apagou a memória do lead"), ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
+    ("POST", r"^/api/niches/(\d+)/variants/generate$", "Gerou variações da abertura"), ("POST", r"^/api/official/test-template$", "Enviou template de teste (API oficial)"), ("PUT", r"^/api/playbook$", "Alterou o playbook de objeções"), ("DELETE", r"^/api/leads/([^/]+)/memory$", "Apagou a memória do lead"), ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/niches/(\d+)/setup/apply$", "Aplicou rascunho de abertura do assistente"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
     ("POST", r"^/api/dispatch$", "Criou disparo"), ("PUT", r"^/api/pacing$", "Alterou ritmo de envio"), ("POST", r"^/api/outbox/pause$", "Pausou/retomou a fila de envio"), ("POST", r"^/api/outbox/clear$", "Limpou a fila de envio"),
     ("POST", r"^/api/connection/pair$", "Gerou código de conexão do WhatsApp"), ("POST", r"^/api/connection/logout$", "Desconectou o WhatsApp"),
     ("POST", r"^/api/lines$", "Adicionou número de WhatsApp"), ("PUT", r"^/api/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/lines/([\w-]+)$", "Removeu número de WhatsApp"),
@@ -8210,3 +8210,86 @@ def agent_persona(niche, line):
 
 def fill_agent(text, persona):
     return (text or "").replace("{agente}", persona) if persona else (text or "")
+
+
+# ======================================================================
+# v30: assistente de primeira configuração (lista do que falta + rascunho do agente por IA)
+# ======================================================================
+SETUP_SYSTEM = ("RASCUNHO DE AGENTE SDR. Você escreve a mensagem de primeiro contato de uma SDR de WhatsApp (assistente virtual) a partir dos dados do negócio. "
+                "Regras: português do Brasil; use {nome} para o nome do lead e {agente} para o nome da assistente; deixe claro que é uma assistente virtual; cite o nome da empresa; "
+                "até 350 caracteres; UMA pergunta simples ou pedido de permissão; termine com \"Se não quiser receber mensagens, responda SAIR.\"; "
+                "NÃO invente fatos, preços, prazos, descontos nem promessas: use só o que foi informado. "
+                "Formato da resposta (exatamente): primeira linha 'ABERTURA:' e o texto; depois uma linha só com --- e 3 variações com abordagens diferentes (motivo do contato; pergunta; mais curta), separadas por linhas com ---. Nada além disso.")
+
+def setup_items():
+    """Itens da configuração inicial. ok=True quando já está feito; required=False são opcionais."""
+    items = []
+    def add(id_, label, ok, hint, tab, required=True):
+        items.append({"id": id_, "label": label, "ok": bool(ok), "hint": hint, "tab": tab, "required": required})
+    add("token", "Senha do painel forte (16+ caracteres)", len(DASH_TOKEN) >= 16, "Troque o DASH_TOKEN no arquivo .env do servidor por uma senha longa.", 0)
+    add("claude", "Chave do Claude no servidor", bool(os.getenv("ANTHROPIC_API_KEY")), "Falta ANTHROPIC_API_KEY no arquivo .env do servidor.", 0)
+    lines = [l for l in line_summary() if l["active"]]
+    on = [l for l in lines if l["state"] in ("open", "official")]
+    add("wa", "WhatsApp conectado", on, "Abra Envio e conexão e leia o QR Code (WhatsApp > Aparelhos conectados).", 3)
+    d = default_niche_id()
+    n = get_niche(d) if d else None
+    if n:
+        pend = unfilled_fields(n)
+        add("niche_fill", f"Agente \"{n['name']}\" sem campos [..] pendentes", not pend, ("Preencha: " + ", ".join(pend[:4])) if pend else "", 2)
+        add("opening", "Mensagem de primeiro contato escrita", (n["outbound_text"] or "").strip(), "Use o botão \"Gerar rascunho com IA\" abaixo ou escreva em Agentes.", 2)
+        need_name = "{agente}" in ((n["outbound_text"] or "") + (n.get("outbound_variants") or "") + (n["prompt"] or ""))
+        has_name = bool((n.get("agent_name") or "").strip() or any((l["persona"] or "").strip() for l in lines))
+        add("agent_name", "Nome do agente definido", has_name or not need_name, "A abertura usa {agente}: informe o nome no agente ou em cada número.", 2)
+        add("knowledge", "Conhecimento do negócio preenchido", len((n.get("knowledge") or "").strip()) >= 80, "Cole em Agentes > Conhecimento o que o agente pode afirmar (planos, valores, regras). Sem isso ele não responde preço.", 2)
+        add("variants", "Variações da abertura (evita repetição)", parse_variants(n.get("outbound_variants") or ""), "Opcional, recomendado: o rascunho com IA já traz 3 variações.", 2, False)
+        add("playbook", "Playbook de objeções", any((v or "").strip() for v in playbook_get(n["id"]).values()), "Opcional: em Funil, diga como contornar \"está caro\", \"vou pensar\" etc.", 4, False)
+    add("prospect", "Chave do Google (prospecção)", bool(prospect_key()), "Opcional: GOOGLE_PLACES_API_KEY no .env, para buscar empresas no Google.", 10, False)
+    return items
+
+@app.get("/api/setup/status", dependencies=[Depends(auth)])
+async def setup_status():
+    items = setup_items()
+    req = [i for i in items if i["required"]]
+    return {"items": items, "done": sum(i["ok"] for i in req), "total": len(req), "ready": all(i["ok"] for i in req)}
+
+class SetupDraftIn(BaseModel):
+    empresa: str
+    oferta: str
+    publico: str = ""
+    agente: str = ""
+
+@app.post("/api/niches/{nid}/setup/draft", dependencies=[Depends(auth)])
+async def setup_draft(nid: int, b: SetupDraftIn):
+    n = get_niche(nid)
+    if not n:
+        raise HTTPException(404, "nicho não encontrado")
+    if not b.empresa.strip() or not b.oferta.strip():
+        raise HTTPException(400, "Informe o nome da empresa e o que ela oferece")
+    nome = clean_persona(b.agente)
+    dados = f"Empresa: {b.empresa.strip()[:120]}\nO que oferece: {b.oferta.strip()[:600]}\nPúblico: {b.publico.strip()[:300] or 'não informado'}\nNome da assistente: {nome or 'use {agente}'}"
+    txt = await claude_text([{"type": "text", "text": SETUP_SYSTEM}], [{"role": "user", "content": dados}], 1200, kind="rascunho", niche_id=nid)
+    txt = re.sub(r"^\s*ABERTURA:\s*", "", txt or "", flags=re.I).strip()
+    parts = parse_variants(txt)
+    if not parts:
+        raise HTTPException(502, "Não consegui gerar o rascunho agora. Tente de novo.")
+    ver = lambda t: t if "sair" in t.lower() else t + " Se não quiser receber mensagens, responda SAIR."
+    log("agente", f"rascunho de abertura gerado para {n['name']} (aguardando revisão)")
+    return {"opening": ver(parts[0]), "variants": [ver(p) for p in parts[1:4]], "agent_name": nome}
+
+class SetupApplyIn(BaseModel):
+    opening: str
+    variants: list = []
+    agent_name: str = ""
+
+@app.post("/api/niches/{nid}/setup/apply", dependencies=[Depends(auth)])
+async def setup_apply(nid: int, b: SetupApplyIn):
+    n = get_niche(nid)
+    if not n:
+        raise HTTPException(404, "nicho não encontrado")
+    if not b.opening.strip():
+        raise HTTPException(400, "A abertura não pode ficar vazia")
+    with conn() as c:
+        c.execute("UPDATE niches SET outbound_text=?, outbound_variants=?, agent_name=COALESCE(NULLIF(?,''), agent_name) WHERE id=?",
+                  (b.opening.strip(), clean_variants("\n---\n".join(str(v) for v in b.variants)), clean_persona(b.agent_name), nid))
+    log("agente", f"rascunho aplicado ao nicho {n['name']}")
+    return {"ok": True}

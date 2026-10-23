@@ -570,6 +570,15 @@ const step = async (name, fn) => {
     await api('/__test/notice', { body: {} })
     await page.reload(); await sleep(700); expect(!(await page.isVisible('#opn')), 'faixa deveria sumir')
   })
+  await step('Primeira configuração: lista do que falta e rascunho por IA com revisão antes de aplicar', async () => {
+    await page.click('#t2'); await until(async () => (await page.innerText('#stp_l')).includes('WhatsApp'), 5000, 'lista')
+    if (!(await page.isVisible('#sd_e'))) await page.click('#stp_d summary')
+    await page.fill('#sd_e', 'Vida Mais'); await page.fill('#sd_o', 'planos de saúde no RJ'); await page.click('#sd_g')
+    await until(async () => (await page.inputValue('#sd_ro')).includes('SAIR'), 8000, 'rascunho')
+    const antes = (await db("SELECT outbound_text t FROM niches WHERE id=1"))[0].t
+    expect(antes !== (await page.inputValue('#sd_ro')), 'rascunho não pode ser salvo antes de aplicar')
+    await page.click('#sd_ap'); await until(async () => (await db("SELECT outbound_text t FROM niches WHERE id=1"))[0].t.includes('SAIR'), 5000, 'aplicado')
+  })
   await step('LGPD: exportar e apagar os dados de um contato pela tela; lista de supressão', async () => {
     await inbound({ from: '5541900000010', name: 'Titular Teste', id: 'LG1', type: 'text', text: 'oi, quero plano de saúde, moramos em Campinas' })
     await until(async () => await lead('5541900000010'), 8000, 'lead')

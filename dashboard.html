@@ -79,7 +79,19 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 </main>
 
 <main id="v2" class="hide">
-<section class="col"><h2>Agentes por nicho <button id="nn">+ Novo</button></h2><div class="scroll" id="nl"></div></section>
+<section class="col"><h2>Agentes por nicho <button id="nn">+ Novo</button></h2>
+<div id="stp" style="margin:0 0 8px;padding:8px;border:1px solid var(--bd,#2a3340);border-radius:8px"><b>Primeira configuração <span id="stp_n" class="note"></span></b>
+ <div id="stp_l" style="margin:6px 0"></div>
+ <details id="stp_d"><summary>Gerar rascunho do agente com IA</summary>
+  <label>Empresa</label><input type="text" id="sd_e" placeholder="Ex.: Vida Mais Corretora">
+  <label>O que oferece (só fatos reais)</label><textarea id="sd_o" rows="3" placeholder="Ex.: planos de saúde individuais e empresariais no RJ"></textarea>
+  <label>Quem é o público (opcional)</label><input type="text" id="sd_p" placeholder="Ex.: MEIs e pequenas empresas">
+  <label>Nome do agente (opcional)</label><input type="text" id="sd_a" placeholder="Ex.: Ana">
+  <button id="sd_g">Gerar rascunho</button> <span class="note" id="sd_m"></span>
+  <div id="sd_r" class="hide"><label>1º contato</label><textarea id="sd_ro" rows="4"></textarea><label>Variações (separe com ---)</label><textarea id="sd_rv" rows="6"></textarea>
+   <button id="sd_ap">Aplicar a este agente</button> <small>Revise antes: nada é enviado a ninguém.</small></div>
+ </details></div>
+<div class="scroll" id="nl"></div></section>
 <section class="col"><h2><span id="et">Editar agente</span><span class="note" id="es"></span></h2>
 <div class="form" id="ef">
  <div class="row"><div><label>Nome do nicho</label><input type="text" id="en"></div>
@@ -426,7 +438,7 @@ async function prPoll(){try{const j=await api("/api/prospect/job/"+PRJ);$("pr_ba
  $("pr_go").disabled=false;$("pr_cancel").classList.add("hide");$("pr_barw").classList.add("hide");if(j.state!="erro"){$("pr_f_s").value=String(j.search_id||"");await prList()}}catch(e){$("pr_msg").textContent=e.message;$("pr_go").disabled=false}}
 $("pr_exp").onclick=async()=>{try{const r=await api("/api/prospect/export",{ids:PRR.map(x=>x.place_id)});const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([r.csv],{type:"text/csv"}));a.download="prospeccao.csv";a.click()}catch(e){alert(e.message)}};
 $("pr_imp").onclick=async()=>{$("pr_imsg").textContent="";try{const r=await api("/api/prospect/import",{ids:[...PRSEL],niche_id:+$("pr_niche").value,line:$("pr_line").value,ack:$("pr_ack").checked,include_probable:$("pr_prob").checked});const k=r.skipped||{};$("pr_imsg").textContent=`${r.queued} na fila${r.suppressed?`, ${r.suppressed} já pediram para sair`:""}${k.provavel?`, ${k.provavel} sem WhatsApp confirmado (ignoradas)`:""}${k.sem_whatsapp?`, ${k.sem_whatsapp} sem WhatsApp`:""}.`;PRSEL.clear();await prList()}catch(e){$("pr_imsg").textContent=e.message}};
-function tab(n){[1,2,3,4,5,6,7,8,9,10].forEach(i=>{$("v"+i).classList.toggle("hide",n!=i);$("t"+i).classList.toggle("on",n==i)});if(n==3)loadEnvio();if(n==4){loadPlaybook();loadReview();loadFunil();loadOrders()}if(n==5)loadAvisos();if(n==6)loadRetomada();if(n==7)loadCustos();if(n==8){loadInteg();loadLgpd();loadPay()}if(n==10)loadProsp();if(n==9)loadBoard()}
+function tab(n){[1,2,3,4,5,6,7,8,9,10].forEach(i=>{$("v"+i).classList.toggle("hide",n!=i);$("t"+i).classList.toggle("on",n==i)});if(n==3)loadEnvio();if(n==4){loadPlaybook();loadReview();loadFunil();loadOrders()}if(n==5)loadAvisos();if(n==6)loadRetomada();if(n==7)loadCustos();if(n==8){loadInteg();loadLgpd();loadPay()}if(n==10)loadProsp();if(n==2)loadSetup();if(n==9)loadBoard()}
 $("t1").onclick=()=>tab(1);$("t2").onclick=()=>tab(2);$("t3").onclick=()=>tab(3);[4,5,6,7,8,9,10].forEach(n=>$("t"+n).onclick=()=>tab(n));$("pw").onclick=()=>tab(5);$("pc").onclick=()=>tab(3);
 
 // nichos
@@ -940,5 +952,14 @@ $("eabr").onclick=async()=>{const r=await api(`/api/ab?niche_id=${ni}&days=30`);
  const row=(l,v)=>`<tr><td><b>${l}</b></td><td>${v.leads}</td><td>${v.responderam}</td><td>${v.qualificados}</td><td>${v.encaminhados}</td><td>${v.ganhos}</td><td>${f("msgs_lead",v)}</td><td>${v.custo_lead==null?"—":brl(v.custo_lead)}</td></tr>`;
  $("eabo").innerHTML=`<table><thead><tr><th>Versão</th><th>Leads</th><th>Resp.</th><th>Qualif.</th><th>Encam.</th><th>Ganhos</th><th>Msgs do lead</th><th>Custo/lead</th></tr></thead><tbody>${row("A (atual)",r.A)}${row("B",r.B)}</tbody></table><div class="note" style="margin-top:6px">${r.active?`Teste ligado: ${r.ab_pct}% dos leads novos no B. `:"Teste desligado. "}${esc(r.verdict)}</div>`};
 api("/api/status").then(s=>{$("pm").textContent="Modelo: "+s.model});
-loadNiches().then(()=>{loadQuick();tick();setInterval(tick,3000)});
+
+async function loadSetup(){try{const d=await api("/api/setup/status");$("stp_n").textContent=d.done+"/"+d.total+(d.ready?" · pronto":"");
+ $("stp_l").innerHTML=d.items.map(i=>`<div style="margin:3px 0">${i.ok?"✅":(i.required?"⬜":"▫️")} <span ${i.ok?'style="opacity:.6"':""}>${esc(i.label)}${i.required?"":" (opcional)"}</span>${!i.ok&&i.hint?`<br><small>${esc(i.hint)}</small>`:""}${!i.ok&&i.tab?` <a href="#" data-g="${i.tab}">abrir</a>`:""}</div>`).join("");
+ $("stp_l").querySelectorAll("a[data-g]").forEach(a=>a.onclick=e=>{e.preventDefault();tab(+a.dataset.g)});
+ $("stp_d").open=!d.ready&&!d.items.find(i=>i.id=="opening").ok}catch(e){}}
+$("sd_g").onclick=async()=>{$("sd_m").textContent="Gerando...";try{const r=await api(`/api/niches/${ni}/setup/draft`,{empresa:$("sd_e").value,oferta:$("sd_o").value,publico:$("sd_p").value,agente:$("sd_a").value});
+ $("sd_ro").value=r.opening;$("sd_rv").value=r.variants.join("\n---\n");$("sd_r").classList.remove("hide");$("sd_r").dataset.a=r.agent_name||"";$("sd_m").textContent="Revise o texto abaixo."}catch(e){$("sd_m").textContent=e.message}};
+$("sd_ap").onclick=async()=>{try{await api(`/api/niches/${ni}/setup/apply`,{opening:$("sd_ro").value,variants:$("sd_rv").value.split(/\n---\n/).map(x=>x.trim()).filter(Boolean),agent_name:$("sd_r").dataset.a||""});
+ $("sd_r").classList.add("hide");await loadNiches();loadSetup();flash("sd_m","Aplicado ao agente")}catch(e){$("sd_m").textContent=e.message}};
+loadNiches().then(()=>{loadSetup();loadQuick();tick();setInterval(tick,3000)});
 </script></body></html>

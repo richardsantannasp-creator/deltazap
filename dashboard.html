@@ -506,7 +506,7 @@ async function loadEnvio(){loadConn();loadOfficial();const m=await api("/api/met
  const mx=Math.max(1,...m.hourly);$("bars").innerHTML=m.hourly.map((v,h)=>`<i title="${h}h: ${v}" style="height:${Math.max(3,v/mx*100)}%"></i>`).join("");
  $("bn").innerHTML=m.by_niche.length?m.by_niche.map(n=>`<tr><td>${esc(n.name)}</td><td>${n.sent}</td><td>${n.replied}${n.sent?" ("+Math.round(n.replied*100/n.sent)+"%)":""}</td></tr>`).join(""):'<tr><td colspan="3" class="note">Sem envios nos últimos 7 dias.</td></tr>';
  pcfg=c;if(!editing){F.forEach(k=>$("p_"+k).value=c[k]);$("p_warmup").checked=c.warmup;$("p_weekdays_only").checked=c.weekdays_only}
- $("wu").textContent=c.warmup_start;if(!window._wpEdit)$("wp_in").value=(c.warmup_plan||[]).join(", ");$("ppause").textContent=c.paused?"Retomar envios":"Pausar envios";
+ $("wu").textContent=c.warmup_start;if(!window._wpEdit)$("wp_in").value=(c.warmup_plan||[]).join(", ");$("ppause").textContent=(c.paused||c.autopause)?"Retomar envios":"Pausar envios";
  $("apause").innerHTML=c.autopause?`<div class="warn"><b>Envios pausados automaticamente:</b> ${esc(c.autopause)}. Revise antes de retomar.</div>`:c.paused?'<div class="warn">Envios pausados pelo operador.</div>':"";
  $("pinfo").textContent=`Fuso: ${c.tz}. Limite de hoje: ${c.allowed_today}. Pisos de segurança: intervalo mínimo 20 s, máximo 300 contatos novos por dia.`;
  const q=await api("/api/outbox");$("bq").innerHTML=q.length?q.map(o=>`<tr><td>${esc(o.name||o.phone)}</td><td>${esc(o.niche||"")}</td><td>${o.status}${o.error?" · "+esc(o.error):""}${multi()&&o.line?" · "+esc(lineName(o.line)):""}</td></tr>`).join(""):'<tr><td colspan="3" class="note">Fila vazia.</td></tr>'}

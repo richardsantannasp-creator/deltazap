@@ -162,6 +162,9 @@ const step = async (name, fn) => {
     await page.check('#dc'); const d2 = dialogs.length; await page.click('#dgo')
     await until(() => dialogs.length > d2 && dialogs.at(-1).includes('de onde veio o consentimento'), 4000, 'exige a origem do consentimento')
     await page.fill('#dorig', 'formulário do site em 10/2026'); await page.click('#dgo')
+    await until(async () => (await page.innerText('#dprev')).includes('4 contato(s) serão enfileirados') && (await page.innerText('#dgo')).includes('Confirmar'), 5000, 'prévia do disparo')
+    expect((await db("SELECT COUNT(*) n FROM outbox WHERE status='queued'"))[0].n === 0, 'a prévia enfileirou antes de confirmar')
+    await page.click('#dgo')
     await until(async () => (await page.innerText('#dres')).includes('4 contato(s) na fila'), 5000, 'enfileirou')
     expect((await db("SELECT consent FROM outbox LIMIT 1"))[0].consent === 'formulário do site em 10/2026', 'origem gravada na fila')
     await page.click('#dx')
@@ -529,6 +532,7 @@ const step = async (name, fn) => {
     const opts = await page.$$eval('#dline option', (o) => o.map((x) => x.value)); expect(opts.join() === 'auto,main,comercial-2', 'opções: ' + opts)
     await page.selectOption('#dn', '1'); await page.selectOption('#dline', 'comercial-2')
     await page.fill('#dl', '5511912340001;Rita Dois'); await page.check('#dc'); await page.fill('#dorig', 'lista do evento Y'); await page.click('#dgo')
+    await until(async () => (await page.innerText('#dgo')).includes('Confirmar'), 4000, 'prévia'); await page.click('#dgo')
     await until(async () => (await page.innerText('#dres')).includes('na fila'), 4000, 'na fila')
     await page.click('#dx')
     let sent = []

@@ -392,8 +392,9 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 <textarea id="dl" rows="6" placeholder="11999999999;Maria Souza;Padaria X&#10;21988887777;João Lima"></textarea>
 <label style="display:flex;gap:8px;align-items:flex-start;margin:10px 0" class="note"><input type="checkbox" id="dc"> Confirmo que estes contatos deram consentimento (opt-in) para receber mensagens no WhatsApp.</label>
 <label class="note" style="display:block;margin-top:8px">De onde veio o consentimento destes contatos? (obrigatório, fica registrado em cada lead)</label><input type="text" id="dorig" maxlength="200" placeholder="Ex.: formulário do site em 10/2026; lista do evento X">
+<div id="dprev" class="hide" style="margin:8px 0;padding:8px;border:1px solid var(--bd,#2a3340);border-radius:8px"></div>
 <div class="note" id="dres"></div>
-<div class="row" style="justify-content:flex-end;margin-top:8px"><button class="g" id="dx">Fechar</button><button id="dgo">Disparar</button></div>
+<div class="row" style="justify-content:flex-end;margin-top:8px"><button class="g" id="dx">Fechar</button><button id="dgo">Revisar e disparar</button></div>
 <div class="note">Os contatos entram numa fila e saem de forma gradual, conforme o ritmo definido na aba Envio e conexão. Quem pediu para sair nunca recebe novo disparo.</div></dialog>
 
 <script>
@@ -465,9 +466,23 @@ $("et_").onclick=()=>runTest("ativo");$("et2").onclick=()=>runTest("receptivo");
 // disparo
 $("open").onclick=()=>{$("dres").textContent="";loadLines();$("dlg").showModal()};$("dx").onclick=()=>$("dlg").close();
 $("dn").onchange=()=>{const n=niches.find(x=>x.id==$("dn").value);$("dpv").textContent=n?(n.template?`Template: ${n.template}\n\n`:"")+n.outbound_text.replace("{agente}",n.agent_name||"[nome do agente]").replace("{nome}","Maria").replace("{empresa}","sua empresa"):"Escolha um nicho para ver a mensagem."};
+let dgoSig="";
+const dgoPayload=()=>({niche_id:+$("dn").value,lines:$("dl").value,consent:$("dc").checked,origem:$("dorig").value,line:multi()?$("dline").value:""});
+const dgoReset=()=>{dgoSig="";$("dprev").classList.add("hide");$("dgo").textContent="Revisar e disparar";$("dgo").disabled=false};
+["dn","dl","dc","dorig","dline"].forEach(i=>{const e=$(i);if(e){e.addEventListener("input",dgoReset);e.addEventListener("change",dgoReset)}});
 $("dgo").onclick=async()=>{const id=+$("dn").value;if(!id){$("dres").textContent="Defina o nicho de atuação antes de disparar.";return}
- const r=await api("/api/dispatch",{niche_id:id,lines:$("dl").value,consent:$("dc").checked,origem:$("dorig").value,line:multi()?$("dline").value:""});
- $("dres").textContent=(r.queued?`${r.queued} contato(s) na fila. Acompanhe na aba Envio e conexão.`:"Nenhum contato novo (já estavam na fila).")+(r.suppressed?` ${r.suppressed} contato(s) ignorado(s) por terem pedido para sair.`:"");tick()};
+ const body=dgoPayload(),sig=JSON.stringify(body);
+ if(sig!==dgoSig){ // 1º passo: prévia obrigatória
+  const p=await api("/api/dispatch/preview",body);const sk=p.skipped;
+  const skt=[sk.supressao&&`${sk.supressao} pediram para sair`,sk.pessoal&&`${sk.pessoal} contatos pessoais protegidos`,sk.em_conversa&&`${sk.em_conversa} já em conversa`,sk.ja_na_fila&&`${sk.ja_na_fila} já na fila`].filter(Boolean).join(" · ");
+  $("dprev").innerHTML=`<b>Prévia: ${p.to_send} contato(s) serão enfileirados</b>${skt?` <span class="note">(ignorados: ${skt})</span>`:""}<br><span class="note">${p.days?`Com o limite de hoje (${p.daily_capacity}/dia somando os números) e ${p.backlog} já na fila, leva cerca de ${p.days} dia(s) útil(eis).`:"Nenhum número ativo agora: a fila espera a conexão."}</span>`
+   +p.warnings.map(w=>`<div style="margin:4px 0">⚠️ ${esc(w)}</div>`).join("")
+   +p.samples.map(m=>`<div class="pv" style="margin:6px 0"><small class="note">${esc(m.to)} · ${esc(m.phone)}${p.samples.length>1?` · abertura ${m.variant==0?"principal":"variação "+m.variant}`:""}</small><br>${esc(m.text)}</div>`).join("");
+  $("dprev").classList.remove("hide");dgoSig=sig;
+  if(p.blocked||!p.to_send){$("dgo").textContent="Revisar de novo";dgoSig="";$("dres").textContent=p.blocked?"Corrija os avisos acima antes de disparar.":"Nenhum contato novo para enfileirar.";return}
+  $("dgo").textContent=`Confirmar e enfileirar ${p.to_send}`;$("dres").textContent="Confira as mensagens acima. Nada foi enfileirado ainda.";return}
+ const r=await api("/api/dispatch",body);
+ $("dres").textContent=(r.queued?`${r.queued} contato(s) na fila. Acompanhe na aba Envio e conexão.`:"Nenhum contato novo (já estavam na fila).")+(r.suppressed?` ${r.suppressed} contato(s) ignorado(s) por terem pedido para sair ou serem contatos pessoais.`:"");dgoReset();tick()};
 
 // carregar prompt/base de um arquivo .txt ou .md do computador
 let ldT=null;document.querySelectorAll(".ld").forEach(b=>b.onclick=()=>{ldT=b.dataset.t;$("lf").click()});

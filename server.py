@@ -1096,6 +1096,87 @@ async def dispatch(b: DispatchIn, bg: BackgroundTasks):
     lgpd_record("consentimento", f"{added} contato(s) para {niche['name']}: {origem}")
     return {"queued": added, "suppressed": skipped_sup}
 
+
+def _mask_phone(p):
+    return ("+" + p[:4] + "…" + p[-4:]) if len(p) > 8 else p
+
+def render_opening_preview(niche, base, name, company, persona):
+    fn = first_name(name)
+    t = fill_agent(base, persona).replace("{nome}", fn).replace("{empresa}", company or "")
+    if "sair" not in t.lower():
+        t += " Se não quiser receber mensagens, responda SAIR."
+    return t
+
+@app.post("/api/dispatch/preview", dependencies=[Depends(auth)])
+async def dispatch_preview(b: DispatchIn):
+    """Prévia obrigatória do disparo: confere a lista, mostra mensagens reais e estima quanto tempo leva. Não grava nada."""
+    niche = get_niche(b.niche_id)
+    if not niche:
+        raise HTTPException(400, "Escolha o nicho de atuação")
+    if not b.consent:
+        raise HTTPException(400, "Confirme que os contatos deram consentimento (opt-in)")
+    if len(" ".join((b.origem or "").split())) < 5:
+        raise HTTPException(400, "Informe de onde veio o consentimento destes contatos (ex.: formulário do site em 10/2026, lista do evento X). Fica registrado em cada lead.")
+    line = (b.line or "").strip()
+    if line and line != "auto" and not known_line(line):
+        raise HTTPException(400, "Linha (número) desconhecida")
+    line = "" if line in ("", "auto") else line
+    rows = parse_lines(b.lines)
+    skip = {"supressao": 0, "pessoal": 0, "em_conversa": 0, "ja_na_fila": 0}
+    ok_rows = []
+    with conn() as c:
+        queued = {r["phone"] for r in c.execute("SELECT phone FROM outbox WHERE status='queued'")}
+        stages = {r["phone"]: r["stage"] for r in c.execute("SELECT phone,stage FROM leads WHERE test=0")}
+    for r in rows:
+        ph = r[0]
+        if is_suppressed(ph) or stages.get(ph) == "descartado":
+            skip["supressao"] += 1
+        elif is_personal(ph):
+            skip["pessoal"] += 1
+        elif ph in queued:
+            skip["ja_na_fila"] += 1
+        elif ph in stages and stages[ph] != "novo":
+            skip["em_conversa"] += 1
+        else:
+            ok_rows.append(r)
+    warnings = []
+    pend = unfilled_fields(niche)
+    if pend:
+        warnings.append(f"O agente \"{niche['name']}\" ainda tem campos para preencher: {', '.join(pend[:5])}. Nada será enviado até corrigir.")
+    use_template = PROVIDER == "official" and niche["template"]
+    persona = agent_persona(niche, line or "main")
+    options = [niche["outbound_text"]] + ([] if use_template else parse_variants(niche.get("outbound_variants") or ""))
+    if any("{agente}" in o for o in options) and not persona and not use_template:
+        warnings.append("A abertura usa {agente}, mas nenhum nome foi definido (agente ou número). Defina antes de disparar.")
+    if not (niche["outbound_text"] or "").strip() and not use_template:
+        warnings.append("O agente não tem texto de primeiro contato.")
+    no_name = sum(1 for r in ok_rows if not (r[1] or "").strip())
+    if no_name:
+        warnings.append(f"{no_name} contato(s) sem nome: a mensagem sai com \"tudo bem\" no lugar do nome.")
+    if any("{empresa}" in o for o in options):
+        sem = sum(1 for r in ok_rows if not (r[2] or "").strip())
+        if sem:
+            warnings.append(f"A abertura usa {{empresa}} e {sem} contato(s) estão sem empresa.")
+    if niche.get("personalize") and not use_template:
+        warnings.append("Este agente personaliza cada abertura com a IA: o texto final varia por contato (a prévia mostra a base).")
+    if use_template:
+        warnings.append(f"Modo API oficial: vai o template \"{niche['template']}\", não o texto livre.")
+    cfg = get_pacing()
+    ln_ids = [line] if line else active_lines()
+    cap = sum(allowed_today(cfg, l) for l in ln_ids) if ln_ids else 0
+    backlog = len(queued)
+    total = len(ok_rows)
+    days = None
+    if cap > 0:
+        days = max(1, -(-(backlog + total) // cap))
+    samples = []
+    if ok_rows and options:
+        for i, r in enumerate(ok_rows[:5]):
+            samples.append({"to": r[1] or _mask_phone(r[0]), "phone": _mask_phone(r[0]), "variant": (i % len(options)), "text": render_opening_preview(niche, options[i % len(options)], r[1], r[2], persona)})
+    return {"total_lines": len(rows), "to_send": total, "skipped": skip, "backlog": backlog, "daily_capacity": cap, "days": days,
+            "warnings": warnings, "blocked": bool(pend) or any(("{agente}" in o) for o in options) and not persona and not use_template,
+            "samples": samples, "template": niche["template"] if use_template else ""}
+
 # teste do agente (nada vai ao WhatsApp)
 @app.post("/api/test-lead", dependencies=[Depends(auth)])
 async def test_lead(b: TestIn):
@@ -3037,6 +3118,53 @@ def day_start_local():
     n = now_local()
     return datetime(n.year, n.month, n.day, tzinfo=TZ).timestamp()
 
+def digest_numbers_block(t0):
+    """Situação de cada número no resumo: conexão, envios do dia, fila e sinais de risco (resposta baixa, saídas)."""
+    out = []
+    try:
+        lines = [l for l in line_summary() if l["active"] or l["queued"]]
+    except Exception:
+        return out
+    if not lines:
+        return out
+    out += ["", "📱 Números:"]
+    for l in lines:
+        h = line_health(l["id"])
+        estado = "conectado" if l["state"] in ("open", "official") else ("PAUSADO" if not l["active"] else ("estado ainda não verificado" if not l["state"] else "FORA DO AR (" + str(l["state"]) + ")"))
+        extra = []
+        if l["warm_day"]:
+            extra.append(f"aquecimento dia {l['warm_day']}/14" + (" (segurando)" if l["warm_hold"] else ""))
+        if h["sent"] >= 15:
+            extra.append(f"resposta {h['reply_pct']:.0f}% · saídas {h['optout_pct']:.1f}% (3 dias)")
+        flag = " ⚠️" if (l["state"] not in ("open", "official", None) and l["active"]) or l["warm_hold"] or (h["sent"] >= 15 and h["optout_pct"] >= 4) else ""
+        out.append(f"- {l['label']}: {estado}; enviados {l['sent_today']}/{l['allowed_today']}, fila {l['queued']}" + (" · " + " · ".join(extra) if extra else "") + flag)
+    sent7, _, opt7 = rates(time.time() - 7 * 86400)
+    lim = get_pacing()["max_optout_pct"]
+    if sent7 >= 20:
+        pct = opt7 * 100 / sent7
+        out.append(f"Saídas/descartes (7 dias): {pct:.1f}% (pausa automática em {lim:g}%)" + (" ⚠️ perto do limite" if pct >= lim * 0.6 else ""))
+    return out
+
+def digest_agents_block(t0):
+    """Desempenho do dia por agente (nicho): contatos enviados, quem respondeu e qualificados."""
+    with conn() as c:
+        sent = {r["niche_id"]: r["n"] for r in c.execute("SELECT niche_id, COUNT(*) n FROM outbox WHERE status='sent' AND sent_at>=? GROUP BY niche_id", (t0,))}
+        rep = {r["niche_id"]: r["n"] for r in c.execute("SELECT l.niche_id, COUNT(DISTINCT m.phone) n FROM messages m JOIN leads l ON l.phone=m.phone WHERE l.test=0 AND m.role='lead' AND m.ts>=? GROUP BY l.niche_id", (t0,))}
+        qua = {r["niche_id"]: r["n"] for r in c.execute("SELECT l.niche_id, COUNT(DISTINCT se.phone) n FROM stage_events se JOIN leads l ON l.phone=se.phone WHERE l.test=0 AND se.ts>=? AND se.stage IN ('qualificado','encaminhado','reuniao_agendada') GROUP BY l.niche_id", (t0,))}
+        names = {r["id"]: r["name"] for r in c.execute("SELECT id,name FROM niches")}
+        try:
+            fixed = c.execute("SELECT COUNT(*) n FROM review_log WHERE ts>=?", (t0,)).fetchone()["n"]
+        except Exception:
+            fixed = 0
+    ids = [i for i in names if sent.get(i) or rep.get(i) or qua.get(i)]
+    out = []
+    if ids:
+        out += ["", "🤖 Por agente:"]
+        out += [f"- {names[i]}: {sent.get(i, 0)} enviados · {rep.get(i, 0)} responderam · {qua.get(i, 0)} qualificados" for i in ids]
+    if fixed:
+        out += ["", f"🛡️ A revisão antes de enviar corrigiu {fixed} resposta(s) com número ou prazo sem base."]
+    return out
+
 def compute_digest():
     """Texto do resumo do dia (desde 00:00 do horário local)."""
     t0, now = day_start_local(), time.time()
@@ -3069,6 +3197,7 @@ def compute_digest():
         L += [f"- {w['name'] or w['phone']} (+{w['phone']}), há {int((now - w['alerted_at']) / 60)} min" for w in waiting]
     else:
         L += ["", "Nenhum lead aguardando atendimento."]
+    L += digest_numbers_block(t0) + digest_agents_block(t0)
     month = month_cost_brl()
     L += ["", f"Custo do Claude hoje: R$ {usd * cfg['usd_brl']:.2f} · no mês: R$ {month:.2f}" +
           (f" ({month * 100 / cfg['budget_month_brl']:.0f}% do orçamento)" if cfg["budget_month_brl"] else "")]

@@ -300,3 +300,7 @@ Em **Integrações > Contatos pessoais**: o sistema nunca escreve primeiro nem r
 - **Lista manual:** cole os números (um por linha). Funciona também na API oficial, onde não há agenda para ler.
 Efeitos: importações, planilhas e prospecção pulam esses números; o que já estava na fila para eles é cancelado; mensagens recebidas deles são ignoradas (sem lead, sem resposta). Os números ficam guardados só como código (hash), como a lista de supressão. Dá para desligar a proteção no próprio card.
 Limite: a agenda só vem do WhatsApp se o contato estiver salvo com nome e sincronizado; por isso vale também colar a lista manual dos mais importantes.
+
+## Prévia do disparo e resumo diário
+- **Prévia obrigatória:** em Disparar, o botão "Revisar e disparar" mostra primeiro quantos contatos serão enfileirados e por que cada um dos demais foi pulado (pediu para sair, contato pessoal, já em conversa, já na fila), até 5 mensagens reais já preenchidas (alternando abertura principal e variações), avisos (campo [..] pendente, falta de nome do agente, contatos sem nome) e o prazo estimado pelo limite diário dos números. Só o segundo clique ("Confirmar e enfileirar") grava na fila.
+- **Resumo diário** (Integrações > Resumo diário; vem desligado): agora inclui a situação de cada número (conectado ou fora do ar, enviados/limite, fila, aquecimento, resposta e saídas de 3 dias), as saídas de 7 dias frente ao limite da pausa automática, o desempenho de cada agente no dia e quantas respostas a revisão antes de enviar corrigiu.

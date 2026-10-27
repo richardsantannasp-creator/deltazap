@@ -286,3 +286,7 @@ GATEWAY_SECRET=<a mesma senha> npm start
 Na aba **Agentes** há o card "Primeira configuração": uma lista do que falta (senha forte, chave do Claude, WhatsApp conectado, abertura, nome do agente, campos [..], conhecimento) e, em opcionais, variações e playbook.
 O botão "Gerar rascunho do agente com IA" pede empresa, o que oferece (só fatos reais), público e nome, e escreve o 1º contato + 3 variações, sempre com SAIR e sem inventar preço ou prazo.
 O rascunho **só vale depois que você revisa e clica em Aplicar**; nada é enviado a ninguém. Chaves e senhas continuam só no `.env` do servidor.
+
+## Agente pronto: Energia solar — Vendas
+Pasta `niches/vendas-energia-solar/`. Entra sozinho no painel (aba Agentes) na próxima atualização. Segue o roteiro: primeiro contato, necessidade, conta de energia (lida do PDF/foto), benefício, encaminhamento à equipe, proposta, objeções, fechamento e 3 retomadas.
+Antes de disparar: troque `[NOME DA EMPRESA]` (abertura, variações e prompt), defina o nome do agente e preencha "Dados da empresa" e "Condições comerciais" no Conhecimento. O agente não calcula economia, preço, garantia nem prazo: esses números vêm da equipe/proposta.

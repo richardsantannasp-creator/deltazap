@@ -21,7 +21,7 @@ const step = async (name, fn) => {
 }
 
 ;(async () => {
-  const srv = spawn('python3', [path.join(ROOT, 'tests/harness.py'), String(PORT)], { cwd: ROOT, env: { ...process.env, BACKUP_DIR: require('os').tmpdir() + '/sdr-e2e-bk-' + Date.now() } })
+  const srv = spawn('python3', [path.join(ROOT, 'tests/harness.py'), String(PORT)], { cwd: ROOT, env: { ...process.env, NICHES_SKIP: 'vendas-energia-solar', BACKUP_DIR: require('os').tmpdir() + '/sdr-e2e-bk-' + Date.now() } })
   let srvLog = ''
   srv.stdout.on('data', (d) => (srvLog += d)); srv.stderr.on('data', (d) => (srvLog += d))
   await until(() => srvLog.includes('harness em'), 15000, 'servidor de teste')

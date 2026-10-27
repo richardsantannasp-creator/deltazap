@@ -219,9 +219,10 @@ def seed_files():
     root = HERE / "niches"
     if not root.exists():
         return
+    skip = set(filter(None, os.getenv("NICHES_SKIP", "").split(",")))      # só para testes: nichos prontos que não devem ser carregados
     for d in sorted(root.iterdir()):
         mp = d / "meta.json"
-        if not mp.exists():
+        if not mp.exists() or d.name in skip:
             continue
         key = "seeded:" + d.name
         with conn() as c:
@@ -8199,6 +8200,23 @@ def migrate_v29():
                 c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
 migrate_v29()
 
+def seed_extras():
+    """Completa os nichos prontos (niches/<slug>/meta.json) com variações de abertura e nome do agente, colunas que só existem após as migrações v28/v29."""
+    root = HERE / "niches"
+    if not root.exists():
+        return
+    for d in sorted(root.iterdir()):
+        mp = d / "meta.json"
+        key = "seeded_extras:" + d.name
+        if not mp.exists() or get_setting(key):
+            continue
+        meta = json.loads(mp.read_text(encoding="utf-8"))
+        if get_setting("seeded:" + d.name) and (meta.get("outbound_variants") or meta.get("agent_name")):
+            with conn() as c:
+                c.execute("UPDATE niches SET outbound_variants=?, agent_name=COALESCE(NULLIF(?,''),agent_name) WHERE name=? AND COALESCE(outbound_variants,'')=''",
+                          (clean_variants(meta.get("outbound_variants", "")), clean_persona(meta.get("agent_name", "")), meta["name"]))
+        set_setting(key, "1")
+
 def clean_persona(n):
     return re.sub(r"[^\w .'\-]", "", n or "").strip()[:30]
 
@@ -8210,6 +8228,8 @@ def agent_persona(niche, line):
 
 def fill_agent(text, persona):
     return (text or "").replace("{agente}", persona) if persona else (text or "")
+
+seed_extras()
 
 
 # ======================================================================

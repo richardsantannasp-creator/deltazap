@@ -1,0 +1,9 @@
+{
+  "name": "Energia solar — Vendas",
+  "outbound_text": "Olá, {nome}! Tudo bem? Aqui é {agente}, assistente virtual da [NOME DA EMPRESA], que trabalha com energia solar. Estamos ajudando clientes a avaliar como reduzir o gasto com energia. Posso te fazer algumas perguntas rápidas para ver se faz sentido para você? Se não quiser receber mensagens, responda SAIR.",
+  "outbound_variants": "Olá, {nome}! Aqui é {agente}, assistente virtual da [NOME DA EMPRESA]. Vi que você demonstrou interesse em energia solar. Você busca uma solução para casa, empresa ou propriedade rural? Se não quiser receber mensagens, responda SAIR.\n---\nOi, {nome}! Sou {agente}, assistente virtual da [NOME DA EMPRESA]. Ajudamos a entender quanto dá para economizar na conta de luz com energia solar. Posso te fazer 2 perguntas rápidas? Se não quiser receber mensagens, responda SAIR.",
+  "doc_hint": "distribuidora de energia, cidade e UF, tipo de ligação (monofásica, bifásica ou trifásica), consumo em kWh do mês e o histórico dos últimos meses, valor total da fatura em reais, classe (residencial, comercial, rural)",
+  "template": "",
+  "template_lang": "pt_BR",
+  "keywords": "energia solar, painel solar, placa solar, placas solares, fotovoltaico, fotovoltaica, sistema solar, gerar energia, economizar na conta de luz, conta de luz, conta de energia, kwp, geração distribuída, energia fotovoltaica, orçamento solar, orcamento solar"
+}

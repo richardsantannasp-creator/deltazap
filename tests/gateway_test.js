@@ -52,6 +52,7 @@ if(rq.url==='/pic'){rs.writeHead(200,{'content-type':'image/png'});return rs.end
 if(rq.url==='/open'){const k=pick(b);reg[k.dir]=true;k.user={id:(b.me||'5521999990000')+':12@s.whatsapp.net'};k.ev.emit('connection.update',{connection:'open'});return ok({})}
 if(rq.url==='/message'){pick(b).ev.emit('messages.upsert',{messages:[b.m||b],type:'notify'});return ok({})}
 if(rq.url==='/close'){pick(b).ev.emit('connection.update',{connection:'close',lastDisconnect:{error:{output:{statusCode:b.code},message:'fechou'}}});return ok({})}
+if(rq.url==='/emit'){pick(b).ev.emit(b.event,b.data);return ok({})}
 if(rq.url==='/log')return ok({sockets,actions});ok({})})}).listen(ctrlPort,'127.0.0.1')
 module.exports={makeWASocket,useMultiFileAuthState,fetchLatestBaileysVersion,downloadMediaMessage,DisconnectReason}`
 const BAILEYS_CJS = `const c=require('./core.cjs');Object.assign(exports,c);exports.default=c.makeWASocket;Object.defineProperty(exports,'__esModule',{value:true})`
@@ -188,12 +189,12 @@ async function scenario(variant, full) {
     })
     await step('servidor → conector: disparo da fila sai com "digitando"; sem conexão a fila registra falha', async () => {
       await srv('/api/pacing', { method: 'PUT', body: { warmup: false, daily_limit: 300 } })
-      await srv('/api/dispatch', { body: { niche_id: 1, lines: '5521977770001;Carla\n5521977770002;Davi', consent: true, origem: 'lista de teste' } })
+      await srv('/api/dispatch', { body: { niche_id: 1, lines: '5511944440001;Carla\n5511944440002;Davi', consent: true, origem: 'lista de teste' } })
       await srv('/__test/tick', { body: {} })
-      const a = await acts(); const i = a.map((x) => x.a + ':' + (x.jid || '')).lastIndexOf('send:5521977770001@s.whatsapp.net')
-      expect(i > 0 && a.slice(0, i).some((x) => x.a === 'presence' && x.jid === '5521977770001@s.whatsapp.net' && x.state === 'composing') && a[i].text.includes('Carla'), 'envio do 1º contato')
+      const a = await acts(); const i = a.map((x) => x.a + ':' + (x.jid || '')).lastIndexOf('send:5511944440001@s.whatsapp.net')
+      expect(i > 0 && a.slice(0, i).some((x) => x.a === 'presence' && x.jid === '5511944440001@s.whatsapp.net' && x.state === 'composing') && a[i].text.includes('Carla'), 'envio do 1º contato')
       await ctrl('/close', { code: 500 }); await until(async () => (await gw('/status')).json.state === 'closed' || true, 500)
-      const st = (await srv('/__test/tick', { body: {} })).json.find((r) => r.phone === '5521977770002')
+      const st = (await srv('/__test/tick', { body: {} })).json.find((r) => r.phone === '5511944440002')
       expect(['failed', 'queued', 'sent'].includes(st.status), 'status: ' + st.status)
     })
     await step('desconectar pelo painel apaga a sessão e volta a pedir o QR; código por número pelo servidor', async () => {
@@ -240,6 +241,18 @@ async function scenario(variant, full) {
       await until(async () => (await ctrl('/log')).actions.some((x) => x.a === 'send' && x.jid === '5521988881234@s.whatsapp.net'), 6000, 'resposta')
       expect((await ctrl('/log')).actions.filter((x) => x.a === 'send' && x.jid === '5521988881234@s.whatsapp.net').every((x) => x.dir === './auth-comercial-2'), 'resposta saiu por outra sessão')
       expect(JSON.parse(fs.readFileSync(path.join(g, 'jids.json'), 'utf8'))['comercial-2:5521988881234'], 'identificador por linha')
+    })
+    await step('agenda do celular: só contatos salvos (com nome) chegam ao servidor e passam a ser protegidos', async () => {
+      await ctrl('/emit', { line: 'comercial-2', event: 'contacts.upsert', data: [{ id: '5531988776601@s.whatsapp.net', name: 'Mãe' }, { id: '5531988776602@s.whatsapp.net', notify: 'Só pushname' }, { id: '12345@g.us', name: 'Grupo' }] })
+      await ctrl('/emit', { line: 'comercial-2', event: 'messaging-history.set', data: { contacts: [{ id: 'abc@lid', phoneNumber: '5531988776603@s.whatsapp.net', name: 'Tia' }] } })
+      const pers = async () => (await srv('/api/personal')).json
+      await until(async () => ((await pers()).sync['comercial-2'] || {}).n >= 2, 15000, 'agenda sincronizada')
+      const st = await pers()
+      expect(st.sync['comercial-2'].n === 2 && st.count.agenda >= 2, 'esperava 2 contatos salvos: ' + JSON.stringify(st))
+      await ctrl('/message', { line: 'comercial-2', m: { key: { remoteJid: '5531988776601@s.whatsapp.net', fromMe: false, id: 'PERS1' }, pushName: 'Mãe', message: { conversation: 'oi filho, tudo bem?' } } })
+      await new Promise((r) => setTimeout(r, 1500))
+      expect(!(await lead('5531988776601')), 'contato da agenda virou lead')
+      expect(!(await ctrl('/log')).actions.some((x) => x.a === 'send' && x.jid === '5531988776601@s.whatsapp.net'), 'a IA respondeu a um contato pessoal')
     })
     await step('vários números: pelo painel, adicionar número e ver o estado dele', async () => {
       const a = await srv('/api/lines', { body: { label: 'Vendas Sul' } }); expect(a.status === 200 && a.json.id === 'vendas-sul', JSON.stringify(a))

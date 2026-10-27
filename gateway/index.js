@@ -29,6 +29,7 @@ for (const f of [new URL('../.env', import.meta.url), new URL('./.env', import.m
 const PORT = Number(process.env.GATEWAY_PORT || 3001)
 const SECRET = process.env.GATEWAY_SECRET || ''
 const INBOUND_URL = process.env.INBOUND_URL || 'http://127.0.0.1:8000/gateway/inbound'
+const CONTACTS_URL = process.env.CONTACTS_URL || INBOUND_URL.replace(/\/gateway\/inbound$/, '/gateway/contacts')
 const AUTH_DIR = process.env.AUTH_DIR || './auth'
 const JID_FILE = process.env.JID_FILE || './jids.json'
 const MAX_MEDIA = 8 * 1024 * 1024
@@ -57,7 +58,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function start(s) {
   if (s.removed) return
   if (s.sock) { // garante um único socket ativo por linha (vários ao mesmo tempo causam "conexão substituída")
-    try { s.sock.ev.removeAllListeners('connection.update'); s.sock.ev.removeAllListeners('messages.upsert'); s.sock.end(undefined) } catch {}
+    try { s.sock.ev.removeAllListeners('connection.update'); s.sock.ev.removeAllListeners('messages.upsert'); s.sock.ev.removeAllListeners('contacts.upsert'); s.sock.ev.removeAllListeners('contacts.update'); s.sock.ev.removeAllListeners('messaging-history.set'); s.sock.end(undefined) } catch {}
     s.sock = null
   }
   const tag = s.id === 'main' ? '' : `[${s.id}] `
@@ -93,6 +94,28 @@ async function start(s) {
       s.timer = setTimeout(() => start(s).catch((e) => console.error(tag + 'falha ao reiniciar:', e?.message || e)), code === DisconnectReason.loggedOut || code === 515 ? 500 : 3000)
     }
   })
+
+  // agenda do celular: só contatos SALVOS (com nome na agenda) são enviados ao servidor, que nunca os contata nem responde a eles
+  const pend = new Set(); let flushT = null
+  const flush = async () => {
+    flushT = null
+    const phones = [...pend]; pend.clear();
+    for (let i = 0; i < phones.length; i += 500) {
+      try { await fetch(CONTACTS_URL, { method: 'POST', headers: { 'content-type': 'application/json', 'x-secret': SECRET }, body: JSON.stringify({ line: s.id, phones: phones.slice(i, i + 500) }) }) } catch (e) { console.error(tag + 'falha ao enviar agenda:', e?.message || e) }
+    }
+  }
+  const saved = (list) => {
+    for (const c of list || []) {
+      const id = c.id || ''; const alt = c.phoneNumber || ''
+      const jid = id.endsWith('@s.whatsapp.net') ? id : (alt.endsWith('@s.whatsapp.net') ? alt : '')
+      if (!jid || !c.name) continue            // c.name é o nome salvo na agenda; sem ele é só alguém que escreveu (notify)
+      pend.add(jid.split('@')[0].split(':')[0])
+    }
+    if (pend.size && !flushT) flushT = setTimeout(flush, 5000)
+  }
+  sock.ev.on('contacts.upsert', saved)
+  sock.ev.on('contacts.update', saved)
+  sock.ev.on('messaging-history.set', ({ contacts }) => saved(contacts))
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return

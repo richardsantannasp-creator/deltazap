@@ -363,6 +363,11 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
  <div class="note" id="bsupi"></div>
  <div class="note" id="binfo"></div>
  <table><thead><tr><th>Backup</th><th>Tamanho</th><th></th></tr></thead><tbody id="blist"></tbody></table>
+ <h3 style="margin:14px 0 4px;font-size:14px">Contatos pessoais (protegidos)</h3>
+ <div class="note" id="pgn"></div>
+ <label style="display:flex;gap:6px;align-items:center;margin:4px 0"><input type="checkbox" id="pg_on"> O sistema nunca escreve nem responde a contatos pessoais</label>
+ <label class="note">Amigos, família e quem está na sua agenda (um número por linha, com DDD). Além disso, nos números por QR a agenda do celular é lida automaticamente: quem tem nome salvo nela fica protegido.</label><textarea id="pg_l" rows="3" placeholder="11999999999"></textarea>
+ <div class="row"><button class="g" id="pg_go">Proteger estes números</button><button class="g" id="pg_rm">Remover da proteção</button><span class="note" id="pg_m"></span></div>
  <h3 style="margin:14px 0 4px;font-size:14px">Privacidade (LGPD)</h3>
  <div class="note" id="lgn"></div>
  <label class="note">Quem pediu para não receber mensagens por outro canal (um número por linha). Nunca mais entram em disparos.</label><textarea id="sup_l" rows="3" placeholder="11999999999"></textarea>
@@ -545,7 +550,12 @@ checkQr();setInterval(checkQr,30000);
 async function loadNotice(){try{const d=await api("/api/operator-notice"),n=d.notice,b=$("opn");b.classList.toggle("hide",!n);if(n){b.textContent=n.text;b.style.background=n.level=="error"?"var(--er)":n.level=="warn"?"var(--wr)":"var(--in)";b.style.color=n.level=="info"?"var(--tx)":"#fff"}}catch(e){}}
 loadNotice();setInterval(loadNotice,60000);
 // LGPD
-async function loadLgpd(){try{const g=await api("/api/lgpd");$("lgn").textContent=g.suppressed+" número(s) na lista de quem não deve receber mensagens (guardados só como código, sem o telefone).";
+async function loadPersonal(){try{const g=await api("/api/personal");$("pg_on").checked=g.guard;const syn=Object.entries(g.sync||{}).filter(([k,v])=>v&&v.n).map(([k,v])=>k+": "+v.n+" da agenda").join(" · ");
+ $("pgn").textContent=g.count.manual+" número(s) na lista manual · "+g.count.agenda+" da agenda do celular"+(syn?" ("+syn+")":g.provider=="qr"?" · agenda ainda não sincronizada: ela chega sozinha quando o número conecta ou reconecta":"")+" (guardados só como código, sem o telefone)."}catch(e){}}
+$("pg_on").onchange=async()=>{if(!$("pg_on").checked&&!confirm("Desligar a proteção? Contatos pessoais voltam a poder receber disparos e respostas da IA."))return loadPersonal();await api("/api/personal/guard",{enabled:$("pg_on").checked},"PUT");loadPersonal()};
+$("pg_go").onclick=async()=>{try{const r=await api("/api/personal",{lines:$("pg_l").value});$("pg_l").value="";flash("pg_m",r.added+" protegido(s)"+(r.canceled?"; "+r.canceled+" saída(s) cancelada(s) da fila":""),6000);loadPersonal()}catch(e){$("pg_m").textContent=e.message}};
+$("pg_rm").onclick=async()=>{try{const r=await api("/api/personal/remove",{lines:$("pg_l").value});$("pg_l").value="";flash("pg_m",r.removed+" removido(s)");loadPersonal()}catch(e){$("pg_m").textContent=e.message}};
+async function loadLgpd(){loadPersonal();try{const g=await api("/api/lgpd");$("lgn").textContent=g.suppressed+" número(s) na lista de quem não deve receber mensagens (guardados só como código, sem o telefone).";
  $("lgl").innerHTML=g.log.length?g.log.map(r=>`<tr><td>${new Date(r.ts*1e3).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}</td><td>${esc(r.action)}${r.detail?": "+esc(r.detail):""}</td></tr>`).join(""):'<tr><td colspan="2" class="note">Nenhum registro ainda.</td></tr>'}catch(e){}}
 $("sup_go").onclick=async()=>{const r=await api("/api/lgpd/suppress",{lines:$("sup_l").value});$("sup_l").value="";flash("sup_m",r.added+" número(s) adicionado(s)",4000);loadLgpd()};
 

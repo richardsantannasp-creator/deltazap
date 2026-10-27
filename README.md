@@ -293,3 +293,10 @@ Antes de disparar: troque `[NOME DA EMPRESA]` (abertura, variações e prompt), 
 
 ## Agente fixo por número
 Em **Envio e conexão**, cada número tem o seletor "Agente (nicho) que atende quem chamar este número". Com um agente escolhido, todo lead novo que chamar aquele número cai nele, sem usar palavras-chave. Em "Automático" (padrão) vale o roteamento por palavras-chave. Quem já está em conversa não muda de agente.
+
+## Contatos pessoais (proteção)
+Em **Integrações > Contatos pessoais**: o sistema nunca escreve primeiro nem responde (IA) a quem está nessa proteção. Duas fontes:
+- **Agenda do celular (automática, números por QR):** o conector envia ao servidor os telefones que têm nome salvo na agenda de cada número, quando ele conecta ou reconecta. Quem já conversou com o sistema (lead) não entra por aqui.
+- **Lista manual:** cole os números (um por linha). Funciona também na API oficial, onde não há agenda para ler.
+Efeitos: importações, planilhas e prospecção pulam esses números; o que já estava na fila para eles é cancelado; mensagens recebidas deles são ignoradas (sem lead, sem resposta). Os números ficam guardados só como código (hash), como a lista de supressão. Dá para desligar a proteção no próprio card.
+Limite: a agenda só vem do WhatsApp se o contato estiver salvo com nome e sincronizado; por isso vale também colar a lista manual dos mais importantes.

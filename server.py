@@ -570,6 +570,9 @@ WINDOW_MSG = "A janela de 24 h do WhatsApp venceu: a API oficial só permite env
 OPTOUT = re.compile(r"\s*(sair|parar|stop|cancelar|descadastrar)\s*[.!]*\s*", re.I)
 
 async def handle_incoming(phone, name, text, wamid=None, send=True, line=None):
+    if is_personal(phone):
+        log("pessoal", f"{phone}: contato pessoal, mensagem ignorada (sem resposta da IA)")
+        return
     async with LOCKS[phone]:
         if wamid and seen(wamid):
             return
@@ -661,6 +664,9 @@ def unfilled_fields(niche):
     return found
 
 async def dispatch_one(niche, phone, name, company, context="", line=None, consent=""):
+    if is_personal(phone):
+        log("disparo", f"{phone}: pulado (contato pessoal)")
+        return "contato pessoal (protegido)"
     pend = unfilled_fields(niche)
     if pend:
         log("aviso", f"{phone}: não enviado, o nicho {niche['name']} tem campos sem preencher: {', '.join(pend[:4])}")
@@ -1067,7 +1073,7 @@ async def dispatch(b: DispatchIn, bg: BackgroundTasks):
     if len(origem) < 5:
         raise HTTPException(400, "Informe de onde veio o consentimento destes contatos (ex.: formulário do site em 10/2026, lista do evento X). Fica registrado em cada lead.")
     all_rows = parse_lines(b.lines)
-    rows = [r for r in all_rows if not is_suppressed(r[0])]
+    rows = [r for r in all_rows if not is_suppressed(r[0]) and not is_personal(r[0])]
     skipped_sup = len(all_rows) - len(rows)
     if not rows:
         raise HTTPException(400, "Nenhum telefone válido para envio (números inválidos ou que pediram para sair). Use: telefone;nome;empresa;contexto (um por linha)")
@@ -1233,6 +1239,9 @@ async def contacts_parse(b: ContactsIn):
         seen_.add(phone)
         if stages.get(phone) == "descartado" or is_suppressed(phone):
             issues.append({"row": n, "kind": "pulado", "value": phone, "reason": "pediu para sair (não recebe novos disparos)"})
+            continue
+        if is_personal(phone):
+            issues.append({"row": n, "kind": "pulado", "value": phone, "reason": "contato pessoal (protegido)"})
             continue
         if phone in stages and stages[phone] != "novo":
             issues.append({"row": n, "kind": "pulado", "value": phone, "reason": "já está em conversa"})
@@ -6431,7 +6440,7 @@ AUDIT_LABELS = [   # (método, expressão, texto). A primeira que combinar vale;
     ("POST", r"^/api/niches/(\d+)/variants/generate$", "Gerou variações da abertura"), ("POST", r"^/api/official/test-template$", "Enviou template de teste (API oficial)"), ("PUT", r"^/api/playbook$", "Alterou o playbook de objeções"), ("DELETE", r"^/api/leads/([^/]+)/memory$", "Apagou a memória do lead"), ("PUT", r"^/api/review$", "Ligou/desligou a revisão antes de enviar"), ("POST", r"^/api/niches/(\d+)/setup/apply$", "Aplicou rascunho de abertura do assistente"), ("POST", r"^/api/prospect/search$", "Iniciou busca de prospecção"), ("POST", r"^/api/prospect/import$", "Enfileirou empresas da prospecção"), ("PUT", r"^/api/prospect/(.+)$", "Alterou empresa da prospecção"),
     ("POST", r"^/api/dispatch$", "Criou disparo"), ("PUT", r"^/api/pacing$", "Alterou ritmo de envio"), ("POST", r"^/api/outbox/pause$", "Pausou/retomou a fila de envio"), ("POST", r"^/api/outbox/clear$", "Limpou a fila de envio"),
     ("POST", r"^/api/connection/pair$", "Gerou código de conexão do WhatsApp"), ("POST", r"^/api/connection/logout$", "Desconectou o WhatsApp"),
-    ("POST", r"^/api/lines$", "Adicionou número de WhatsApp"), ("PUT", r"^/api/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/lines/([\w-]+)$", "Removeu número de WhatsApp"),
+    ("POST", r"^/api/lines$", "Adicionou número de WhatsApp"), ("POST", r"^/api/personal$", "Protegeu contatos pessoais"), ("POST", r"^/api/personal/remove$", "Removeu contatos da proteção pessoal"), ("PUT", r"^/api/personal/guard$", "Ligou/desligou a proteção de contatos pessoais"), ("PUT", r"^/api/lines/([\w-]+)$", "Alterou número de WhatsApp"), ("DELETE", r"^/api/lines/([\w-]+)$", "Removeu número de WhatsApp"),
     ("POST", r"^/api/qr-ack$", "Aceitou o risco do modo QR"), ("POST", r"^/api/lgpd/suppress$", "Adicionou números à lista de supressão"),
     ("DELETE", r"^/api/leads/(\d+)$", "Apagou os dados de um lead (LGPD)"), ("POST", r"^/api/leads/(\d+)/takeover$", "Assumiu/devolveu a conversa (painel)"),
     ("POST", r"^/api/leads/(\d+)/send$", "Enviou mensagem manual"), ("POST", r"^/api/leads/(\d+)/outcome$", "Definiu resultado do lead"), ("POST", r"^/api/leads/(\d+)/handled$", "Marcou lead como atendido"),
@@ -7598,7 +7607,7 @@ def _prospect_flags(rows):
     for r in rows:
         r = dict(r)
         num = re.sub(r"\D", "", r.get("whatsapp") or "")
-        r["blocked"] = r["status"] == "Não contatar" or any(is_suppressed(x) for x in {num, re.sub(r"\D", "", r.get("e164") or "")} if x)
+        r["blocked"] = r["status"] == "Não contatar" or any(is_suppressed(x) or is_personal(x) for x in {num, re.sub(r"\D", "", r.get("e164") or "")} if x)
         r["lead_stage"] = leads.get(num, "")
         r["link"] = "" if r["blocked"] or not num else "https://wa.me/" + num
         out.append(r)
@@ -8334,3 +8343,111 @@ async def setup_apply(nid: int, b: SetupApplyIn):
                   (b.opening.strip(), clean_variants("\n---\n".join(str(v) for v in b.variants)), clean_persona(b.agent_name), nid))
     log("agente", f"rascunho aplicado ao nicho {n['name']}")
     return {"ok": True}
+
+
+# ======================================================================
+# v32: contatos pessoais (agenda do celular + lista manual): o sistema nunca escreve para eles nem responde a eles
+# ======================================================================
+def migrate_v32():
+    with conn() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS personal(h TEXT PRIMARY KEY, ts REAL, source TEXT DEFAULT 'manual')")
+migrate_v32()
+
+def phone_variants(phone):
+    """Número com e sem o 9º dígito (celulares do Brasil aparecem das duas formas)."""
+    d = re.sub(r"\D", "", phone or "")
+    out = {d} if d else set()
+    if d.startswith("55") and len(d) == 13 and d[4] == "9":
+        out.add(d[:4] + d[5:])
+    elif d.startswith("55") and len(d) == 12 and d[4] in "6789":
+        out.add(d[:4] + "9" + d[4:])
+    return out
+
+def personal_guard_on():
+    return get_setting("personal_guard", "1") != "0"
+
+def is_personal(phone):
+    if not personal_guard_on():
+        return False
+    hs = [phash(v) for v in phone_variants(phone)]
+    if not hs:
+        return False
+    with conn() as c:
+        return c.execute(f"SELECT 1 FROM personal WHERE h IN ({','.join('?' * len(hs))})", hs).fetchone() is not None
+
+def personal_add(phones, source="manual"):
+    """Marca números como pessoais e cancela o que estiver na fila para eles. Devolve (marcados, cancelados)."""
+    added = canceled = 0
+    with conn() as c:
+        for ph in phones:
+            for v in phone_variants(ph):
+                cur = c.execute("INSERT OR IGNORE INTO personal(h,ts,source) VALUES(?,?,?)", (phash(v), time.time(), source))
+                added += cur.rowcount
+                canceled += c.execute("UPDATE outbox SET status='skipped' WHERE phone=? AND status='queued'", (v,)).rowcount
+    return added, canceled
+
+def personal_count():
+    with conn() as c:
+        rows = {r["source"]: r["n"] for r in c.execute("SELECT source, COUNT(*) n FROM personal GROUP BY source")}
+    return {"manual": rows.get("manual", 0), "agenda": rows.get("agenda", 0)}
+
+@app.get("/api/personal", dependencies=[Depends(auth)])
+async def personal_get():
+    sync = {}
+    for ln in db_lines():
+        try:
+            sync[ln["id"]] = json.loads(get_setting("personal_sync_" + ln["id"], "") or "{}")
+        except Exception:
+            sync[ln["id"]] = {}
+    return {"guard": personal_guard_on(), "count": personal_count(), "sync": sync, "provider": PROVIDER}
+
+class PersonalIn(BaseModel):
+    lines: str = ""
+
+@app.post("/api/personal", dependencies=[Depends(auth)])
+async def personal_post(b: PersonalIn):
+    phones = [norm_phone(x) for x in re.split(r"[\n;,]", b.lines or "")]
+    phones = [p for p in phones if p]
+    if not phones:
+        raise HTTPException(400, "Nenhum telefone válido. Escreva um número por linha, com DDD.")
+    added, canceled = personal_add(phones, "manual")
+    log("pessoal", f"{len(phones)} contato(s) pessoal(is) protegido(s); {canceled} saída(s) cancelada(s) da fila")
+    return {"added": len(phones), "canceled": canceled}
+
+@app.post("/api/personal/remove", dependencies=[Depends(auth)])
+async def personal_remove(b: PersonalIn):
+    n = 0
+    with conn() as c:
+        for x in re.split(r"[\n;,]", b.lines or ""):
+            for v in phone_variants(norm_phone(x)):
+                n += c.execute("DELETE FROM personal WHERE h=?", (phash(v),)).rowcount
+    log("pessoal", f"{n} número(s) removido(s) da lista de contatos pessoais")
+    return {"removed": n}
+
+@app.put("/api/personal/guard", dependencies=[Depends(auth)])
+async def personal_guard_put(b: dict):
+    set_setting("personal_guard", "1" if b.get("enabled") else "0")
+    log("pessoal", "proteção de contatos pessoais " + ("ligada" if b.get("enabled") else "DESLIGADA"))
+    return {"guard": personal_guard_on()}
+
+@app.post("/gateway/contacts")
+async def gw_contacts(req: Request, x_secret: str = Header(default="")):
+    """O conector envia os telefones SALVOS na agenda do celular (só quem tem nome na agenda). Quem já conversou com o sistema não entra."""
+    if not GATEWAY_SECRET or not hmac.compare_digest(x_secret, GATEWAY_SECRET):
+        raise HTTPException(403)
+    d = await req.json()
+    line = str(d.get("line") or "main")
+    phones = []
+    for x in (d.get("phones") or [])[:5000]:
+        p = re.sub(r"\D", "", str(x))
+        if 10 <= len(p) <= 15 and not any(get_lead(v) for v in phone_variants(p)):
+            phones.append(p)
+    added, canceled = personal_add(phones, "agenda")
+    try:
+        prev = json.loads(get_setting("personal_sync_" + line, "") or "{}")
+    except Exception:
+        prev = {}
+    set_setting("personal_sync_" + line, json.dumps({"n": int(prev.get("n", 0)) + len(phones), "ts": time.time()}))
+    if canceled:
+        log("pessoal", f"{canceled} saída(s) cancelada(s) da fila: eram contatos da agenda")
+    return {"ok": True, "received": len(phones)}

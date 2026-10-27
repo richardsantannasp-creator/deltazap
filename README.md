@@ -290,3 +290,6 @@ O rascunho **só vale depois que você revisa e clica em Aplicar**; nada é envi
 ## Agente pronto: Energia solar — Vendas
 Pasta `niches/vendas-energia-solar/`. Entra sozinho no painel (aba Agentes) na próxima atualização. Segue o roteiro: primeiro contato, necessidade, conta de energia (lida do PDF/foto), benefício, encaminhamento à equipe, proposta, objeções, fechamento e 3 retomadas.
 Antes de disparar: troque `[NOME DA EMPRESA]` (abertura, variações e prompt), defina o nome do agente e preencha "Dados da empresa" e "Condições comerciais" no Conhecimento. O agente não calcula economia, preço, garantia nem prazo: esses números vêm da equipe/proposta.
+
+## Agente fixo por número
+Em **Envio e conexão**, cada número tem o seletor "Agente (nicho) que atende quem chamar este número". Com um agente escolhido, todo lead novo que chamar aquele número cai nele, sem usar palavras-chave. Em "Automático" (padrão) vale o roteamento por palavras-chave. Quem já está em conversa não muda de agente.

@@ -42,6 +42,7 @@ echo "== 34/40 memória por lead (resumo das conversas longas)"; python3 tests/m
 echo "== 35/40 playbook de objeções"; python3 tests/playbook_test.py 2>&1 | grep -v '^\[' | tail -3 || fail=1
 echo "== 36/40 prontidão da API oficial (checklist, templates, teste)"; python3 tests/official_test.py 2>&1 | grep -v '^\[' | tail -3 || fail=1
 echo "== 37/40 variações da abertura (rodízio, SAIR e medição)"; python3 tests/openings_test.py 2>&1 | grep -v '^\[' | tail -3 || fail=1
+echo "== 38d/43 agente fixo por número"; python3 tests/linenicho_test.py 2>&1 | grep -v '^\[' | tail -3 || fail=1
 echo "== 38c/42 nicho pronto Energia solar"; python3 tests/energia_test.py 2>&1 | grep -v '^\[' | tail -3 || fail=1
 echo "== 38b/41 assistente de primeira configuração"; python3 tests/setup_test.py 2>&1 | grep -v '^\[' | tail -3 || fail=1
 echo "== 38/40 nome do agente que dispara ({agente})"; python3 tests/persona_test.py 2>&1 | grep -v '^\[' | tail -3 || fail=1

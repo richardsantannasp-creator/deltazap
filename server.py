@@ -574,7 +574,8 @@ async def handle_incoming(phone, name, text, wamid=None, send=True, line=None):
         if wamid and seen(wamid):
             return
         if not get_lead(phone):
-            nid_, how = route_niche(text)
+            fixed = line_niche(line)
+            nid_, how = (fixed, "número fixo") if fixed else route_niche(text)
             upsert_lead(phone, name, niche_id=nid_, origin="receptivo")
             log("roteamento", f"{phone}: receptivo → {get_niche(nid_)['name']} ({how})")
         else:
@@ -3207,7 +3208,7 @@ def line_summary(cfg=None):
     out = []
     for ln in db_lines():
         st = LINE_STATE.get(ln["id"]) or {}
-        out.append({"id": ln["id"], "label": ln["label"] or ln["id"], "persona": ln.get("persona") or "", "active": bool(ln["active"]), "state": st.get("state") if PROVIDER == "qr" else "official",
+        out.append({"id": ln["id"], "label": ln["label"] or ln["id"], "persona": ln.get("persona") or "", "niche_id": int(ln.get("niche_id") or 0), "active": bool(ln["active"]), "state": st.get("state") if PROVIDER == "qr" else "official",
                     "me": st.get("me"), "sent_today": sent.get(ln["id"], 0), "allowed_today": allowed_today(cfg, ln["id"]),
                     "queued": q.get(ln["id"], 0), "next_in": max(0, round(LINE_NEXT.get(ln["id"], 0) - now)),
                     "warm_day": (line_warm_day(ln["id"]) + 1) if cfg["warmup"] and line_warm_day(ln["id"]) < 14 else None,
@@ -3261,6 +3262,11 @@ async def lines_put(line_id: str, b: dict):
             c.execute("UPDATE lines SET active=? WHERE id=?", (1 if b["active"] else 0, line_id))
         if "persona" in b:
             c.execute("UPDATE lines SET persona=? WHERE id=?", (clean_persona(str(b["persona"] or "")), line_id))
+        if "niche_id" in b:
+            nid = int(b["niche_id"] or 0)
+            if nid and not get_niche(nid):
+                raise HTTPException(400, "Agente (nicho) não encontrado")
+            c.execute("UPDATE lines SET niche_id=? WHERE id=?", (nid, line_id))
     log("conexao", f"número {line_id} atualizado")
     return {"ok": True}
 
@@ -8199,6 +8205,21 @@ def migrate_v29():
             if col not in {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}:
                 c.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
 migrate_v29()
+
+def migrate_v31():
+    with conn() as c:
+        if "niche_id" not in {r["name"] for r in c.execute("PRAGMA table_info(lines)")}:
+            c.execute("ALTER TABLE lines ADD COLUMN niche_id INTEGER DEFAULT 0")
+migrate_v31()
+
+def line_niche(line):
+    """Agente (nicho) que o operador fixou para o número, ou None quando o número está em automático (palavras-chave)."""
+    if not line:
+        return None
+    with conn() as c:
+        r = c.execute("SELECT niche_id FROM lines WHERE id=?", (line,)).fetchone()
+    nid = int((r["niche_id"] if r else 0) or 0)
+    return nid if nid and get_niche(nid) else None
 
 def seed_extras():
     """Completa os nichos prontos (niches/<slug>/meta.json) com variações de abertura e nome do agente, colunas que só existem após as migrações v28/v29."""
